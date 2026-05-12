@@ -4,6 +4,7 @@ import {
   BACK_WALL_BOTTOM_Y, COURT_FLOOR_Y,
   COLORS, DIFFICULTY, MULTIPLIERS,
 } from '../config/gameConfig.js';
+import * as api from '../api/roundApi.js';
 
 const WALL_THICK   = 16;
 const RIM_THICK    = 8;
@@ -28,6 +29,9 @@ export default class GameScene extends Phaser.Scene {
     this.betDeducted  = false;
     this.gameState    = 'idle';
     this.ballPassedRimTop = false;
+    this.rimOffsetX   = 0;    // 籃框搖擺偏移（動畫）
+    this.rimSeedOffsetX = 0;  // 本球 seed 決定的籃框偏移（Provably Fair）
+    this.roundId      = null; // 當前局 ID（後端）
   }
 
   create() {
@@ -513,6 +517,12 @@ export default class GameScene extends Phaser.Scene {
         this._updateRimPhysics(diff);
         this._rebuildAngledWalls(diff.machineWidth);
 
+        // 歸零視覺偏移
+        this.rimOffsetX = 0;
+        this.rimGraphics.x = 0;
+        this.netGraphics.x = 0;
+        if (this.ledText) this.ledText.x = diff.rimX;
+
         this.ballsScored = 0;
         this.betDeducted = false;
         this.betHint.setAlpha(0.5);
@@ -529,6 +539,41 @@ export default class GameScene extends Phaser.Scene {
     this.matter.body.setPosition(this.leftRimBody,  { x: diff.rimX - diff.rimWidth / 2, y: diff.rimY });
     this.matter.body.setPosition(this.rightRimBody, { x: diff.rimX + diff.rimWidth / 2, y: diff.rimY });
     this.matter.body.setPosition(this.goalSensor,   { x: diff.rimX, y: diff.rimY + 22 });
+  }
+
+  _updateRimMovement(time) {
+    const diff = DIFFICULTY[this.currentDifficulty];
+    if (!diff.rimMove) {
+      this.rimOffsetX = 0;
+      return;
+    }
+
+    const t = time * 0.001 * (diff.rimMoveSpeed / 100);
+
+    if (this.currentDifficulty === 'normal') {
+      // 規則正弦，慢速
+      this.rimOffsetX = Math.sin(t) * diff.rimMoveRange;
+    } else {
+      // 困難：兩個不同頻率的正弦疊加，製造不規則感
+      this.rimOffsetX =
+        Math.sin(t * 1.0) * diff.rimMoveRange * 0.6 +
+        Math.sin(t * 1.9) * diff.rimMoveRange * 0.4;
+    }
+
+    const cx  = this.rimCenterX;
+    const cy  = this.rimCenterY;
+    const rw  = this.rimWidth;
+    const ox  = this.rimOffsetX + (this.rimSeedOffsetX ?? 0); // 動畫偏移 + seed偏移
+
+    // 同步視覺圖層
+    this.rimGraphics.x = ox;
+    this.netGraphics.x = ox;
+    if (this.ledText) this.ledText.x = cx + ox;
+
+    // 同步物理碰撞體
+    this.matter.body.setPosition(this.leftRimBody,  { x: cx - rw / 2 + ox, y: cy });
+    this.matter.body.setPosition(this.rightRimBody, { x: cx + rw / 2 + ox, y: cy });
+    this.matter.body.setPosition(this.goalSensor,   { x: cx + ox, y: cy + 22 });
   }
 
   // ─── Input ────────────────────────────────────────────────
@@ -570,14 +615,46 @@ export default class GameScene extends Phaser.Scene {
     this.shoot(dx, dy);
   }
 
-  shoot(dx, dy) {
+  async shoot(dx, dy) {
     this.lockBet();
     this.gameState = 'flying';
+
+    // ── 後端：建局（首球）+ 取物理參數 ──────────────────────
+    try {
+      if (!this.roundId) {
+        const round = await api.createRound(this.currentDifficulty, this.betAmount);
+        this.roundId = round.roundId;
+        console.log('[API] createRound →', this.roundId, '| hash:', round.serverSeedHash);
+      }
+      const ball = await api.nextBall(this.roundId);
+      this._applyPhysicsParams(ball.params);
+      console.log('[API] nextBall nonce', ball.nonce, '→ params:', ball.params);
+    } catch (e) {
+      // API 失敗時不阻斷遊戲，繼續用現有物理參數
+      console.warn('[API] shoot 取參數失敗（使用預設）:', e.message);
+    }
+
     this.matter.body.setStatic(this.ballBody, false);
     const vx = Phaser.Math.Clamp(dx * 0.30, -25, 25);
     const vy = Phaser.Math.Clamp(dy * 0.30, -55, -8);
     this.matter.body.setVelocity(this.ballBody, { x: vx, y: vy });
     this.ballPassedRimTop = false;
+  }
+
+  /** 將後端物理參數套用到 Matter.js 物理體 */
+  _applyPhysicsParams(params) {
+    // 籃框彈性
+    if (this.leftRimBody)  this.leftRimBody.restitution  = params.rimElasticity;
+    if (this.rightRimBody) this.rightRimBody.restitution = params.rimElasticity;
+
+    // 牆壁彈性（上下四面牆）
+    if (this.upperLeftWall)  this.upperLeftWall.restitution  = params.leftWall;
+    if (this.lowerLeftWall)  this.lowerLeftWall.restitution  = params.leftWall;
+    if (this.upperRightWall) this.upperRightWall.restitution = params.rightWall;
+    if (this.lowerRightWall) this.lowerRightWall.restitution = params.rightWall;
+
+    // 籃框位置偏移（seed 決定，疊加在搖擺偏移上）
+    this.rimSeedOffsetX = params.rimOffset ?? 0;
   }
 
   // ─── Collision ────────────────────────────────────────────
@@ -591,16 +668,22 @@ export default class GameScene extends Phaser.Scene {
   }
 
   // ─── Update ───────────────────────────────────────────────
-  update() {
+  update(time) {
+    // 籃框移動（所有 gameState 都持續，除了過渡期）
+    if (this.gameState !== 'transitioning') {
+      this._updateRimMovement(time);
+    }
+
     if (this.gameState !== 'flying') return;
     const { x: bx, y: by } = this.ballBody.position;
     this._redrawBall(bx, by, false);
 
-    // Goal detection
-    if (!this.ballPassedRimTop && by < this.rimCenterY)       this.ballPassedRimTop = true;
+    // Goal detection（動畫偏移 + seed偏移）
+    const totalOx = this.rimOffsetX + (this.rimSeedOffsetX ?? 0);
+    if (!this.ballPassedRimTop && by < this.rimCenterY) this.ballPassedRimTop = true;
     if (this.ballPassedRimTop && by > this.rimCenterY + 10 && by < this.rimCenterY + 55) {
-      const rimLeft  = this.rimCenterX - this.rimWidth / 2 + 10;
-      const rimRight = this.rimCenterX + this.rimWidth / 2 - 10;
+      const rimLeft  = this.rimCenterX - this.rimWidth / 2 + totalOx + 10;
+      const rimRight = this.rimCenterX + this.rimWidth / 2 + totalOx - 10;
       if (bx > rimLeft && bx < rimRight) this.triggerScore();
     }
 
@@ -612,6 +695,14 @@ export default class GameScene extends Phaser.Scene {
     if (this.gameState !== 'flying') return;
     this.gameState = 'scored';
     this.ballsScored++;
+    this.rimSeedOffsetX = 0; // 本球結束，清除 seed 偏移
+
+    // 後端記錄進球（背景執行，不阻斷動畫）
+    if (this.roundId) {
+      api.recordScore(this.roundId)
+        .then(r => console.log('[API] recordScore → x', r.multiplier, '| 預計兌現:', r.potentialPayout))
+        .catch(e => console.warn('[API] recordScore 失敗:', e.message));
+    }
 
     this.tweens.add({
       targets: this.netGraphics, x: { from: -3, to: 3 },
@@ -636,6 +727,16 @@ export default class GameScene extends Phaser.Scene {
   triggerFail() {
     if (this.gameState === 'failed') return;
     this.gameState = 'failed';
+    this.rimSeedOffsetX = 0;
+
+    // 後端記錄失敗（背景執行）
+    if (this.roundId) {
+      const rid = this.roundId;
+      this.roundId = null;
+      api.fail(rid)
+        .then(r => console.log('[API] fail → serverSeed:', r.serverSeed))
+        .catch(e => console.warn('[API] fail 失敗:', e.message));
+    }
 
     const overlay = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, COLORS.failure, 0.35).setDepth(30);
     this.tweens.add({ targets: overlay, alpha: 0, duration: 600, onComplete: () => overlay.destroy() });
@@ -650,10 +751,27 @@ export default class GameScene extends Phaser.Scene {
     });
   }
 
-  cashout() {
+  async cashout() {
     if (this.gameState !== 'idle' || this.ballsScored === 0) return;
+    this.gameState = 'cashing'; // 防止重複觸發
+
+    // 本地預計算（樂觀顯示）
     const mults  = MULTIPLIERS[this.currentDifficulty];
-    const payout = Math.floor(this.betAmount * mults[Math.min(this.ballsScored, mults.length - 1)]);
+    let payout   = Math.floor(this.betAmount * mults[Math.min(this.ballsScored, mults.length - 1)]);
+
+    // 後端兌現
+    if (this.roundId) {
+      try {
+        const result = await api.cashout(this.roundId);
+        payout = result.payout;
+        console.log('[API] cashout → payout:', payout, '| serverSeed:', result.serverSeed);
+        this.roundId = null;
+      } catch (e) {
+        console.warn('[API] cashout 失敗（使用本地計算）:', e.message);
+        this.roundId = null;
+      }
+    }
+
     this.balance += payout;
     this.updateBalanceDisplay();
 
@@ -669,6 +787,8 @@ export default class GameScene extends Phaser.Scene {
   }
 
   endRound() {
+    this.roundId     = null;
+    this.rimSeedOffsetX = 0;
     this.ballsScored = 0;
     this.betDeducted = false;
     this.updateDots();
