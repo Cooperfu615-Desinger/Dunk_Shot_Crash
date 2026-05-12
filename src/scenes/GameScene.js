@@ -13,6 +13,22 @@ const BALL_RADIUS = 22;
 const BALL_R_FAR  = 15;   // 遠端（靠近籃框）視覺半徑
 const BALL_R_NEAR = 28;   // 近端（靠近玩家）視覺半徑
 
+// 籃板
+const BACKBOARD_Y     = 285;  // 物理位置（比籃框 341 高約 56px）
+const BACKBOARD_THICK = 10;
+
+// Debug 視覺化顏色表
+const DBG = {
+  ceiling:   { c: 0xffff00, a: 0.40 },
+  floor:     { c: 0xffff00, a: 0.40 },
+  wallV:     { c: 0x00ffff, a: 0.38 },
+  wallA:     { c: 0x4488ff, a: 0.38 },
+  backboard: { c: 0xff8800, a: 0.45 },
+  rim:       { c: 0xff4444, a: 0.55 },
+  goal:      { c: 0x00ff88, a: 0.45 },
+  ball:      { c: 0xffffff, a: 0.30 },
+};
+
 // 圖片畫布 780×1688 對應遊戲 390×844，縮放 0.5×
 const IMG_CX = GAME_WIDTH  / 2;  // 195
 const IMG_CY = GAME_HEIGHT / 2;  // 422
@@ -54,6 +70,7 @@ export default class GameScene extends Phaser.Scene {
     this.rimSeedOffsetX = 0;
     this.roundId        = null;
     this._creating      = false;
+    this.debugMode      = false;
   }
 
   // ─── Create ───────────────────────────────────────────────
@@ -64,9 +81,76 @@ export default class GameScene extends Phaser.Scene {
     this.buildBall();
     this.buildUI();
     this.setupInput();
+    // Debug 圖層（最高層，切換顯示/隱藏）
+    this.debugGfx = this.add.graphics().setDepth(99).setVisible(false);
+    this._buildDebugButton();
     // 撐滿螢幕（無黑邊），保持所有遊戲座標不變
     this._fitCamera();
     this.scale.on('resize', this._fitCamera, this);
+  }
+
+  // ─── Debug 視覺化 ─────────────────────────────────────────
+  _buildDebugButton() {
+    const btn = this.add.text(GAME_WIDTH - 10, 10, 'DEBUG', {
+      fontFamily: 'DM Mono, monospace',
+      fontSize:   '11px',
+      color:      '#ffffff',
+      backgroundColor: '#333333',
+      padding:    { x: 6, y: 4 },
+    }).setOrigin(1, 0).setDepth(98).setAlpha(0.70)
+      .setInteractive({ useHandCursor: true });
+
+    btn.on('pointerup', () => this._toggleDebug(btn));
+    this.debugBtn = btn;
+  }
+
+  _toggleDebug(btn) {
+    this.debugMode = !this.debugMode;
+    this.debugGfx.setVisible(this.debugMode);
+    if (!this.debugMode) this.debugGfx.clear();
+    btn.setStyle({ backgroundColor: this.debugMode ? '#cc4400' : '#333333' });
+  }
+
+  /** 每幀重繪所有物理碰撞範圍（debugMode 開啟時） */
+  _drawDebugBodies() {
+    const g = this.debugGfx;
+    g.clear();
+
+    // 依頂點繪製任意多邊形
+    const poly = (body, { c, a }) => {
+      if (!body) return;
+      const v = body.vertices;
+      g.fillStyle(c, a);
+      g.beginPath();
+      g.moveTo(v[0].x, v[0].y);
+      for (let i = 1; i < v.length; i++) g.lineTo(v[i].x, v[i].y);
+      g.closePath();
+      g.fillPath();
+      // 邊框
+      g.lineStyle(1.5, c, Math.min(a + 0.4, 1));
+      g.strokePath();
+    };
+
+    // 圓形（球）
+    const circ = (body, { c, a }) => {
+      if (!body) return;
+      g.fillStyle(c, a);
+      g.fillCircle(body.position.x, body.position.y, body.circleRadius ?? BALL_RADIUS);
+      g.lineStyle(1.5, c, Math.min(a + 0.4, 1));
+      g.strokeCircle(body.position.x, body.position.y, body.circleRadius ?? BALL_RADIUS);
+    };
+
+    poly(this.ceilingBody,    DBG.ceiling);
+    poly(this.floorBody,      DBG.floor);
+    poly(this.upperLeftWall,  DBG.wallV);
+    poly(this.upperRightWall, DBG.wallV);
+    poly(this.lowerLeftWall,  DBG.wallA);
+    poly(this.lowerRightWall, DBG.wallA);
+    poly(this.backboardBody,  DBG.backboard);
+    poly(this.leftRimBody,    DBG.rim);
+    poly(this.rightRimBody,   DBG.rim);
+    poly(this.goalSensor,     DBG.goal);
+    circ(this.ballBody,       DBG.ball);
   }
 
   // ─── 填滿螢幕 ────────────────────────────────────────────
@@ -101,12 +185,12 @@ export default class GameScene extends Phaser.Scene {
     this._imgFull('panel-overlay', 1);
 
     // 物理：天花板（防止球飛出頂部）
-    this.matter.add.rectangle(GAME_WIDTH / 2, -10, GAME_WIDTH, 20, {
+    this.ceilingBody = this.matter.add.rectangle(GAME_WIDTH / 2, -10, GAME_WIDTH, 20, {
       isStatic: true, label: 'ceiling', friction: 0, restitution: 0.55,
     });
-    // 物理：地板
+    // 物理：地板（摩擦大，落地不亂滾）
     this.floorBody = this.matter.add.rectangle(GAME_WIDTH / 2, COURT_FLOOR_Y, GAME_WIDTH, 20, {
-      isStatic: true, label: 'floor', friction: 0.4, restitution: 0.45,
+      isStatic: true, label: 'floor', friction: 0.40, restitution: 0.45,
     });
 
     // 物理：上段垂直牆（後牆區域）
@@ -126,7 +210,7 @@ export default class GameScene extends Phaser.Scene {
       : GAME_WIDTH - sideW + WALL_THICK / 2;
     const halfH = BACK_WALL_BOTTOM_Y / 2;
     return this.matter.add.rectangle(x, halfH, WALL_THICK, BACK_WALL_BOTTOM_Y, {
-      isStatic: true, label: 'wall', friction: 0, restitution: 0.72,
+      isStatic: true, label: 'wall', friction: 0.05, restitution: 0.72,  // 幾乎無摩擦，滑順反彈
     });
   }
 
@@ -147,7 +231,7 @@ export default class GameScene extends Phaser.Scene {
     const len = Math.sqrt(dx * dx + dy * dy);
     return this.matter.add.rectangle(
       (x1 + x2) / 2, (y1 + y2) / 2, len, WALL_THICK,
-      { isStatic: true, label: 'wall', friction: 0, restitution: 0.72, angle: Math.atan2(dy, dx) }
+      { isStatic: true, label: 'wall', friction: 0.10, restitution: 0.65, angle: Math.atan2(dy, dx) }  // 斜牆略有摩擦
     );
   }
 
@@ -176,20 +260,22 @@ export default class GameScene extends Phaser.Scene {
       shadow:     { offsetX: 0, offsetY: 0, color: '#ff0000', blur: 14, fill: true },
     }).setOrigin(0.5).setDepth(10);
 
-    // 物理：籃框左右碰撞體
+    // 物理：籃框左右碰撞體（略有摩擦，邊框打到不會彈太乾）
     this.leftRimBody = this.matter.add.rectangle(
       cx - rw / 2, cy, RIM_THICK, RIM_THICK,
-      { isStatic: true, label: 'rim', friction: 0.2, restitution: 0.55 }
+      { isStatic: true, label: 'rim', friction: 0.15, restitution: 0.55 }
     );
     this.rightRimBody = this.matter.add.rectangle(
       cx + rw / 2, cy, RIM_THICK, RIM_THICK,
-      { isStatic: true, label: 'rim', friction: 0.2, restitution: 0.55 }
+      { isStatic: true, label: 'rim', friction: 0.15, restitution: 0.55 }
     );
     // 物理：進球感應器
     this.goalSensor = this.matter.add.rectangle(
       cx, cy + 15, rw - 16, 10,
       { isStatic: true, isSensor: true, label: 'goal' }
     );
+    // 物理：籃板（摩擦大，打板反彈不會太遠，適合打板球）
+    this.backboardBody = this._createBackboard(diff.machineWidth);
 
     this.rimCenterX = cx;
     this.rimCenterY = cy;
@@ -405,6 +491,16 @@ export default class GameScene extends Phaser.Scene {
     this.matter.body.setPosition(this.leftRimBody,  { x: diff.rimX - diff.rimWidth / 2, y: diff.rimY });
     this.matter.body.setPosition(this.rightRimBody, { x: diff.rimX + diff.rimWidth / 2, y: diff.rimY });
     this.matter.body.setPosition(this.goalSensor,   { x: diff.rimX, y: diff.rimY + 15 });
+    // 籃板：寬度隨難度改變，需重建
+    if (this.backboardBody) this.matter.world.remove(this.backboardBody);
+    this.backboardBody = this._createBackboard(diff.machineWidth);
+  }
+
+  _createBackboard(machineW) {
+    return this.matter.add.rectangle(
+      GAME_WIDTH / 2, BACKBOARD_Y, machineW, BACKBOARD_THICK,
+      { isStatic: true, label: 'backboard', friction: 0.30, restitution: 0.40 }
+    );
   }
 
   // ─── 籃框移動（normal / hard） ────────────────────────────
@@ -546,6 +642,8 @@ export default class GameScene extends Phaser.Scene {
 
   // ─── Update ───────────────────────────────────────────────
   update(time) {
+    if (this.debugMode) this._drawDebugBodies();
+
     if (this.gameState !== 'transitioning') {
       this._updateRimMovement(time);
     }
