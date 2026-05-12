@@ -376,6 +376,8 @@ export default class GameScene extends Phaser.Scene {
     this.matter.body.setStatic(this.ballBody, true);
     this._redrawBall(this.ballStartX, this.ballStartY, false);
     this.ballPassedRimTop = false;
+    // 球閒置時預建局 → 下次射球只需等 nextBall，延遲大幅降低
+    this._preCreateRound();
   }
 
   // ─── UI ───────────────────────────────────────────────────
@@ -468,6 +470,9 @@ export default class GameScene extends Phaser.Scene {
     this.betAmount = this.betPresets[idx];
     this.betText.setText(`$${this.betAmount}`);
     this.tweens.add({ targets: this.betText, scaleX: 1.2, scaleY: 1.2, yoyo: true, duration: 80 });
+    // 投注改變 → 預建的局 betAmount 已過期，重建
+    this.roundId = null;
+    this._preCreateRound();
   }
 
   lockBet() {
@@ -481,6 +486,8 @@ export default class GameScene extends Phaser.Scene {
   // ─── Difficulty ───────────────────────────────────────────
   cycleDifficulty() {
     if (this.gameState !== 'idle' || this.betDeducted) return;
+    // 難度改變 → 舊的預建局作廢
+    this.roundId = null;
     const order = ['easy', 'normal', 'hard'];
     const next  = order[(order.indexOf(this.currentDifficulty) + 1) % 3];
     this.switchDifficulty(next);
@@ -615,30 +622,52 @@ export default class GameScene extends Phaser.Scene {
     this.shoot(dx, dy);
   }
 
-  async shoot(dx, dy) {
+  shoot(dx, dy) {
     this.lockBet();
     this.gameState = 'flying';
 
-    // ── 後端：建局（首球）+ 取物理參數 ──────────────────────
-    try {
-      if (!this.roundId) {
-        const round = await api.createRound(this.currentDifficulty, this.betAmount);
-        this.roundId = round.roundId;
-        console.log('[API] createRound →', this.roundId, '| hash:', round.serverSeedHash);
-      }
-      const ball = await api.nextBall(this.roundId);
-      this._applyPhysicsParams(ball.params);
-      console.log('[API] nextBall nonce', ball.nonce, '→ params:', ball.params);
-    } catch (e) {
-      // API 失敗時不阻斷遊戲，繼續用現有物理參數
-      console.warn('[API] shoot 取參數失敗（使用預設）:', e.message);
-    }
-
+    // ── 立即射球，零延遲 ──────────────────────────────────
     this.matter.body.setStatic(this.ballBody, false);
     const vx = Phaser.Math.Clamp(dx * 0.30, -25, 25);
     const vy = Phaser.Math.Clamp(dy * 0.30, -55, -8);
     this.matter.body.setVelocity(this.ballBody, { x: vx, y: vy });
     this.ballPassedRimTop = false;
+
+    // ── 背景取物理參數（球飛行中套用，碰籃框前就能到） ────
+    this._fetchBallParams();
+  }
+
+  /** 建局 + 取本球物理參數（背景執行，不阻斷射球） */
+  async _fetchBallParams() {
+    try {
+      if (!this.roundId) {
+        const round = await api.createRound(this.currentDifficulty, this.betAmount);
+        this.roundId = round.roundId;
+        console.log('[API] createRound →', this.roundId);
+      }
+      const ball = await api.nextBall(this.roundId);
+      // 只在球還在飛行中才套用（避免混到下一球）
+      if (this.gameState === 'flying') {
+        this._applyPhysicsParams(ball.params);
+        console.log('[API] params applied nonce', ball.nonce, ball.params);
+      }
+    } catch (e) {
+      console.warn('[API] _fetchBallParams 失敗（用預設物理）:', e.message);
+    }
+  }
+
+  /** 閒置時預先建局，讓下次射球只需等 nextBall（更快） */
+  async _preCreateRound() {
+    if (this.roundId || this._creating) return;
+    this._creating = true;
+    try {
+      const round = await api.createRound(this.currentDifficulty, this.betAmount);
+      this.roundId = round.roundId;
+      console.log('[API] pre-created round:', this.roundId);
+    } catch (e) {
+      console.warn('[API] pre-create 失敗:', e.message);
+    }
+    this._creating = false;
   }
 
   /** 將後端物理參數套用到 Matter.js 物理體 */
