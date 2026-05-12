@@ -6,34 +6,57 @@ import {
 } from '../config/gameConfig.js';
 import * as api from '../api/roundApi.js';
 
-const WALL_THICK   = 16;
-const RIM_THICK    = 8;
-const NET_HEIGHT   = 55;
-const BALL_RADIUS  = 22; // physics radius (fixed)
+// ─── 常數 ─────────────────────────────────────────────────
+const WALL_THICK  = 16;
+const RIM_THICK   = 8;
+const BALL_RADIUS = 22;
+const BALL_R_FAR  = 15;   // 遠端（靠近籃框）視覺半徑
+const BALL_R_NEAR = 28;   // 近端（靠近玩家）視覺半徑
 
-// Y-scale for ball perspective: radius at bottom vs near back wall
-const BALL_R_FAR   = 15;
-const BALL_R_NEAR  = 28;
+// 圖片畫布 780×1688 對應遊戲 390×844，縮放 0.5×
+const IMG_CX = GAME_WIDTH  / 2;  // 195
+const IMG_CY = GAME_HEIGHT / 2;  // 422
+
+// 從像素分析得到的元件位置（遊戲座標）
+const ART = {
+  scoreboard: { cx: 195, cy: 182 },   // 計分板中心
+  rim:        { cx: 196, cy: 341 },   // 籃框中心
+  net:        { cx: 197, cy: 365 },   // 籃網中心（中間透明）
+};
 
 export default class GameScene extends Phaser.Scene {
   constructor() { super({ key: 'GameScene' }); }
 
-  // ─── Init ────────────────────────────────────────────────
-  init() {
-    this.currentDifficulty = 'easy';
-    this.ballsScored  = 0;
-    this.balance      = 1000;
-    this.betPresets   = [10, 50, 100, 200, 500, 1000];
-    this.betIndex     = 2;
-    this.betAmount    = this.betPresets[this.betIndex];
-    this.betDeducted  = false;
-    this.gameState    = 'idle';
-    this.ballPassedRimTop = false;
-    this.rimOffsetX   = 0;    // 籃框搖擺偏移（動畫）
-    this.rimSeedOffsetX = 0;  // 本球 seed 決定的籃框偏移（Provably Fair）
-    this.roundId      = null; // 當前局 ID（後端）
+  // ─── Preload ──────────────────────────────────────────────
+  preload() {
+    this.load.image('bg-court',      'bg-court.png');
+    this.load.image('panel-overlay', 'panel-overlay.png');
+    this.load.image('backboard',     'backboard.png');
+    this.load.image('scoreboard',    'scoreboard.png');
+    this.load.image('rim',           'rim.png');
+    this.load.image('net',           'net.png');
+    this.load.image('ball',          'ball.png');
+    this.load.image('ui-bottombar',  'ui-bottombar.png');
   }
 
+  // ─── Init ─────────────────────────────────────────────────
+  init() {
+    this.currentDifficulty = 'easy';
+    this.ballsScored    = 0;
+    this.balance        = 1000;
+    this.betPresets     = [10, 50, 100, 200, 500, 1000];
+    this.betIndex       = 2;
+    this.betAmount      = this.betPresets[this.betIndex];
+    this.betDeducted    = false;
+    this.gameState      = 'idle';
+    this.ballPassedRimTop = false;
+    this.rimOffsetX     = 0;
+    this.rimSeedOffsetX = 0;
+    this.roundId        = null;
+    this._creating      = false;
+  }
+
+  // ─── Create ───────────────────────────────────────────────
   create() {
     this.cameras.main.setBackgroundColor(COLORS.background);
     this.buildCourt();
@@ -43,42 +66,49 @@ export default class GameScene extends Phaser.Scene {
     this.setupInput();
   }
 
+  // ─── 共用：全畫布圖片貼法 ─────────────────────────────────
+  /** 將 780×1688 的圖縮放至遊戲畫布大小，置中放置 */
+  _imgFull(key, depth) {
+    return this.add.image(IMG_CX, IMG_CY, key)
+      .setDisplaySize(GAME_WIDTH, GAME_HEIGHT)
+      .setDepth(depth);
+  }
+
   // ─── Court ───────────────────────────────────────────────
   buildCourt() {
     const diff = DIFFICULTY[this.currentDifficulty];
     this.machineWidth = diff.machineWidth;
 
-    // Graphics layers (order = draw order)
-    this.corridorBg   = this.add.graphics(); // back wall + corridor floor
-    this.panelOverlay = this.add.graphics(); // dark machine side panels (drawn OVER ball)
+    // 層次 0：球場背景
+    this._imgFull('bg-court', 0);
+    // 層次 1：籃球機本體（中間透明，球在裡面玩）
+    this._imgFull('panel-overlay', 1);
 
-    // Ceiling (invisible, keeps ball from leaving top)
+    // 物理：天花板（防止球飛出頂部）
     this.matter.add.rectangle(GAME_WIDTH / 2, -10, GAME_WIDTH, 20, {
       isStatic: true, label: 'ceiling', friction: 0, restitution: 0.55,
     });
-    // Floor
+    // 物理：地板
     this.floorBody = this.matter.add.rectangle(GAME_WIDTH / 2, COURT_FLOOR_Y, GAME_WIDTH, 20, {
       isStatic: true, label: 'floor', friction: 0.4, restitution: 0.45,
     });
 
-    // Upper vertical walls (back wall width zone, y 0 → BACK_WALL_BOTTOM_Y)
+    // 物理：上段垂直牆（後牆區域）
     this.upperLeftWall  = this._makeVerticalWall('left',  diff.machineWidth);
     this.upperRightWall = this._makeVerticalWall('right', diff.machineWidth);
 
-    // Lower angled walls (corridor zone, converge from screen edges to back wall)
+    // 物理：下段斜牆（走廊收斂區域）
     this.lowerLeftWall  = null;
     this.lowerRightWall = null;
     this._rebuildAngledWalls(diff.machineWidth);
-
-    this.drawCorridor(this.machineWidth);
   }
 
   _makeVerticalWall(side, machineW) {
-    const sideW   = (GAME_WIDTH - machineW) / 2;
-    const x       = side === 'left'
+    const sideW = (GAME_WIDTH - machineW) / 2;
+    const x     = side === 'left'
       ? sideW - WALL_THICK / 2
       : GAME_WIDTH - sideW + WALL_THICK / 2;
-    const halfH   = BACK_WALL_BOTTOM_Y / 2;
+    const halfH = BACK_WALL_BOTTOM_Y / 2;
     return this.matter.add.rectangle(x, halfH, WALL_THICK, BACK_WALL_BOTTOM_Y, {
       isStatic: true, label: 'wall', friction: 0, restitution: 0.72,
     });
@@ -88,12 +118,12 @@ export default class GameScene extends Phaser.Scene {
     if (this.lowerLeftWall)  this.matter.world.remove(this.lowerLeftWall);
     if (this.lowerRightWall) this.matter.world.remove(this.lowerRightWall);
 
-    const sideW = (GAME_WIDTH - machineW) / 2;
+    const sideW  = (GAME_WIDTH - machineW) / 2;
     const bwLeft  = sideW;
     const bwRight = GAME_WIDTH - sideW;
 
     this.lowerLeftWall  = this._makeAngledWall(0,          COURT_FLOOR_Y, bwLeft,  BACK_WALL_BOTTOM_Y);
-    this.lowerRightWall = this._makeAngledWall(GAME_WIDTH,  COURT_FLOOR_Y, bwRight, BACK_WALL_BOTTOM_Y);
+    this.lowerRightWall = this._makeAngledWall(GAME_WIDTH, COURT_FLOOR_Y, bwRight, BACK_WALL_BOTTOM_Y);
   }
 
   _makeAngledWall(x1, y1, x2, y2) {
@@ -105,107 +135,32 @@ export default class GameScene extends Phaser.Scene {
     );
   }
 
-  // ─── Corridor Visual ─────────────────────────────────────
-  drawCorridor(machineW) {
-    const sideW   = (GAME_WIDTH - machineW) / 2;
-    const bwLeft  = sideW;
-    const bwRight = GAME_WIDTH - sideW;
-    const bwTop   = 0;
-    const bwBot   = BACK_WALL_BOTTOM_Y;
-    const cx      = GAME_WIDTH / 2;
-
-    // ── Corridor background ──────────────────────────────
-    const bg = this.corridorBg;
-    bg.clear();
-
-    // Back wall (light area behind the hoop)
-    bg.fillStyle(0xdfe4ea, 1);
-    bg.fillRect(bwLeft, bwTop, machineW, bwBot - bwTop);
-
-    // Subtle back wall inner rectangle (court floor markings)
-    bg.fillStyle(0xc8d0da, 0.35);
-    bg.fillRect(bwLeft + 8, bwBot - 60, machineW - 16, 55);
-
-    // Corridor floor (trapezoid from back wall bottom to screen bottom)
-    bg.fillStyle(0xc8c8c0, 1);
-    bg.fillPoints([
-      { x: bwLeft,      y: bwBot },
-      { x: bwRight,     y: bwBot },
-      { x: GAME_WIDTH,  y: COURT_FLOOR_Y },
-      { x: 0,           y: COURT_FLOOR_Y },
-    ], true);
-
-    // Perspective floor lines (converging to vanishing point)
-    const vpX = cx, vpY = bwBot;
-    const numLines = 6;
-    bg.lineStyle(1, 0x999988, 0.3);
-    for (let i = 1; i < numLines; i++) {
-      const t    = i / numLines;
-      const botX = t * GAME_WIDTH;
-      const topX = vpX + (botX - vpX) * 0.05;
-      bg.beginPath();
-      bg.moveTo(botX, COURT_FLOOR_Y);
-      bg.lineTo(topX, vpY);
-      bg.strokePath();
-    }
-
-    // Back wall border
-    bg.lineStyle(2, 0xaab0bb, 0.8);
-    bg.strokeRect(bwLeft, bwTop, machineW, bwBot - bwTop);
-
-    // Corridor edges (back wall bottom → screen bottom edges)
-    bg.lineStyle(2, 0x888880, 0.6);
-    bg.beginPath(); bg.moveTo(bwLeft,  bwBot); bg.lineTo(0,          COURT_FLOOR_Y); bg.strokePath();
-    bg.beginPath(); bg.moveTo(bwRight, bwBot); bg.lineTo(GAME_WIDTH, COURT_FLOOR_Y); bg.strokePath();
-
-    // ── Machine side panels (dark overlay, drawn after ball) ──
-    const po = this.panelOverlay;
-    po.clear();
-
-    // Left panel: polygon from screen-left to back-wall-left
-    po.fillStyle(0x111520, 1);
-    po.fillPoints([
-      { x: 0,      y: 0 },
-      { x: bwLeft, y: 0 },
-      { x: bwLeft, y: bwBot },
-      { x: 0,      y: COURT_FLOOR_Y },
-    ], true);
-    // Right panel
-    po.fillPoints([
-      { x: GAME_WIDTH, y: 0 },
-      { x: bwRight,    y: 0 },
-      { x: bwRight,    y: bwBot },
-      { x: GAME_WIDTH, y: COURT_FLOOR_Y },
-    ], true);
-
-    // Panel inner edge highlight (depth feel)
-    po.lineStyle(2, COLORS.gold, 0.18);
-    po.beginPath(); po.moveTo(bwLeft,  0); po.lineTo(bwLeft,  bwBot); po.lineTo(0,          COURT_FLOOR_Y); po.strokePath();
-    po.beginPath(); po.moveTo(bwRight, 0); po.lineTo(bwRight, bwBot); po.lineTo(GAME_WIDTH, COURT_FLOOR_Y); po.strokePath();
-
-    // Update upper vertical wall positions
-    if (this.upperLeftWall && this.upperRightWall) {
-      this.matter.body.setPosition(this.upperLeftWall,  { x: bwLeft  - WALL_THICK / 2, y: BACK_WALL_BOTTOM_Y / 2 });
-      this.matter.body.setPosition(this.upperRightWall, { x: bwRight + WALL_THICK / 2, y: BACK_WALL_BOTTOM_Y / 2 });
-    }
-  }
-
-  // ─── Rim + Backboard ─────────────────────────────────────
+  // ─── Rim + Backboard（圖片） ──────────────────────────────
   buildRim() {
     const diff = DIFFICULTY[this.currentDifficulty];
-    const cx = diff.rimX;
-    const cy = diff.rimY;   // 280
+    const cx = diff.rimX;   // 195
+    const cy = diff.rimY;   // 341（校準至圖片）
     const rw = diff.rimWidth;
 
-    // Graphics (rim drawn ABOVE corridorBg but BELOW panelOverlay)
-    this.rimGraphics = this.add.graphics();
-    this.netGraphics = this.add.graphics();
+    // 層次 2：籃板
+    this._imgFull('backboard', 2);
+    // 層次 3：計分板
+    this._imgFull('scoreboard', 3);
+    // 層次 4：籃框（可左右移動，所以存 reference）
+    this.rimImg = this._imgFull('rim', 4);
+    // 層次 6：籃網（在球上方，形成入網感）
+    this.netImg = this._imgFull('net', 6);
 
-    this.drawBackboard(cx, cy, rw);
-    this.drawRim(cx, cy, rw);
-    this.drawNet(cx, cy, rw);
+    // LED 倍率文字（疊在計分板上）
+    this.ledText = this.add.text(ART.scoreboard.cx, ART.scoreboard.cy, '1.0x', {
+      fontFamily: 'DM Mono, monospace',
+      fontSize:   '22px',
+      fontStyle:  'bold',
+      color:      '#e03030',
+      shadow:     { offsetX: 0, offsetY: 0, color: '#ff0000', blur: 14, fill: true },
+    }).setOrigin(0.5).setDepth(10);
 
-    // Physics rim pegs
+    // 物理：籃框左右碰撞體
     this.leftRimBody = this.matter.add.rectangle(
       cx - rw / 2, cy, RIM_THICK, RIM_THICK,
       { isStatic: true, label: 'rim', friction: 0.2, restitution: 0.55 }
@@ -214,125 +169,36 @@ export default class GameScene extends Phaser.Scene {
       cx + rw / 2, cy, RIM_THICK, RIM_THICK,
       { isStatic: true, label: 'rim', friction: 0.2, restitution: 0.55 }
     );
-
-    // Goal sensor
+    // 物理：進球感應器
     this.goalSensor = this.matter.add.rectangle(
-      cx, cy + 22, rw - 16, 10,
+      cx, cy + 15, rw - 16, 10,
       { isStatic: true, isSensor: true, label: 'goal' }
     );
 
-    this.rimCenterX  = cx;
-    this.rimCenterY  = cy;
-    this.rimWidth    = rw;
-
-    // LED Scoreboard (above backboard)
-    this._buildScoreboard(cx, cy, rw);
+    this.rimCenterX = cx;
+    this.rimCenterY = cy;
+    this.rimWidth   = rw;
   }
 
-  _buildScoreboard(cx, cy, rw) {
-    const sbW = Math.max(rw + 40, 150);
-    const sbH = 70;
-    const sbY = cy - 175;
-
-    // Board background (black rounded rect — drawn on rimGraphics layer)
-    this.rimGraphics.fillStyle(0x0a0a0a, 1);
-    this.rimGraphics.fillRoundedRect(cx - sbW / 2, sbY, sbW, sbH, 10);
-    this.rimGraphics.lineStyle(2, COLORS.gold, 0.5);
-    this.rimGraphics.strokeRoundedRect(cx - sbW / 2, sbY, sbW, sbH, 10);
-
-    // Multiplier text
-    this.ledText = this.add.text(cx, sbY + sbH / 2, '1.0x', {
-      fontFamily: 'DM Mono, monospace',
-      fontSize: '38px',
-      fontStyle: 'bold',
-      color: '#e03030',
-      shadow: { offsetX: 0, offsetY: 0, color: '#ff0000', blur: 12, fill: true },
-    }).setOrigin(0.5);
-  }
-
-  drawBackboard(cx, cy, rw) {
-    const g   = this.rimGraphics;
-    const bW  = rw + 70;
-    const bH  = 110;
-    const bY  = cy - 90;
-
-    // Backboard body
-    g.fillStyle(0xf0ece0, 1);
-    g.fillRect(cx - bW / 2, bY, bW, bH);
-
-    // Backboard border
-    g.lineStyle(3, 0xcc2222, 1);
-    g.strokeRect(cx - bW / 2, bY, bW, bH);
-
-    // Inner target rectangle
-    const iW = rw + 10, iH = 50;
-    g.lineStyle(2.5, 0xcc2222, 1);
-    g.strokeRect(cx - iW / 2, cy - 45, iW, iH);
-
-    // Backboard support bracket
-    g.fillStyle(0x2c3e50, 1);
-    g.fillRect(cx - 18, bY - 30, 36, 34);
-    g.fillStyle(0x1a252f, 1);
-    g.fillRect(cx - 6, bY - 60, 12, 35);
-  }
-
-  drawRim(cx, cy, rw) {
-    const g = this.rimGraphics;
-    g.lineStyle(RIM_THICK, COLORS.rimMetal, 1);
-    g.beginPath();
-    g.moveTo(cx - rw / 2, cy);
-    g.lineTo(cx + rw / 2, cy);
-    g.strokePath();
-    g.fillStyle(COLORS.rimMetal, 1);
-    g.fillCircle(cx - rw / 2, cy, RIM_THICK / 2);
-    g.fillCircle(cx + rw / 2, cy, RIM_THICK / 2);
-  }
-
-  drawNet(cx, cy, rw) {
-    const g       = this.netGraphics;
-    g.clear();
-    const segments  = 7;
-    const bottomW   = rw * 0.45;
-    const netH      = NET_HEIGHT;
-
-    g.lineStyle(1.2, 0xcccccc, 0.55);
-    for (let i = 0; i <= segments; i++) {
-      const t    = i / segments;
-      const topX = cx - rw / 2 + t * rw;
-      const botX = cx - bottomW / 2 + t * bottomW;
-      g.beginPath(); g.moveTo(topX, cy + 4); g.lineTo(botX, cy + netH); g.strokePath();
-    }
-    for (let row = 1; row <= 4; row++) {
-      const t    = row / 5;
-      const y    = cy + 4 + t * netH;
-      const wAtY = rw - (rw - bottomW) * t;
-      const x0   = cx - wAtY / 2;
-      g.beginPath(); g.moveTo(x0, y); g.lineTo(x0 + wAtY, y); g.strokePath();
-    }
-  }
-
-  // ─── Ball ─────────────────────────────────────────────────
+  // ─── Ball（圖片精靈） ─────────────────────────────────────
   buildBall() {
     const startX = GAME_WIDTH / 2;
-    const startY = COURT_FLOOR_Y - 80; // near bottom of corridor
+    const startY = COURT_FLOOR_Y - 80;
 
     this.ballStartX = startX;
     this.ballStartY = startY;
 
+    // 物理圓形體
     this.ballBody = this.matter.add.circle(startX, startY, BALL_RADIUS, {
       restitution: 0.78, friction: 0.25, frictionAir: 0.008,
       density: 0.003, label: 'ball',
     });
     this.matter.body.setStatic(this.ballBody, true);
 
-    this.ballGraphics = this.add.graphics();
-    this._redrawBall(startX, startY, false);
-
-    // panelOverlay must stay on top of ball — re-add it last
-    // (already created in buildCourt before ball, so ball is above it)
-    // We bring panelOverlay to top after ball is created
-    this.panelOverlay.setDepth(10);
-    this.ballGraphics.setDepth(5);
+    // 層次 5：球圖片（在籃框上、籃網下）
+    this.ballSprite = this.add.image(startX, startY, 'ball').setDepth(5);
+    const r = this._perspRadius(startY);
+    this.ballSprite.setDisplaySize(r * 2, r * 2);
 
     this.matter.world.on('collisionstart', this.onCollision, this);
   }
@@ -344,29 +210,15 @@ export default class GameScene extends Phaser.Scene {
     return Phaser.Math.Linear(BALL_R_FAR, BALL_R_NEAR, t);
   }
 
-  _redrawBall(x, y, glowing) {
-    const g = this.ballGraphics;
-    g.clear();
+  _updateBallSprite(x, y, glowing) {
     const r = this._perspRadius(y);
-
+    this.ballSprite.setPosition(x, y);
+    this.ballSprite.setDisplaySize(r * 2, r * 2);
     if (glowing) {
-      g.fillStyle(COLORS.gold, 0.18);
-      g.fillCircle(x, y, r + 12);
+      this.ballSprite.setTint(0xffdd88);
+    } else {
+      this.ballSprite.clearTint();
     }
-    // Ball body
-    g.fillStyle(COLORS.ball, 1);
-    g.fillCircle(x, y, r);
-
-    // Highlight
-    g.fillStyle(0xffffff, 0.22);
-    g.fillCircle(x - r * 0.28, y - r * 0.28, r * 0.38);
-
-    // Seams
-    g.lineStyle(Math.max(1, r * 0.06), 0x000000, 0.35);
-    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.strokePath();
-    g.lineStyle(Math.max(1, r * 0.05), 0x000000, 0.28);
-    g.beginPath(); g.moveTo(x - r, y); g.lineTo(x + r, y); g.strokePath();
-    g.beginPath(); g.arc(x, y, r * 0.55, -Math.PI * 0.3, Math.PI * 1.3); g.strokePath();
   }
 
   resetBall() {
@@ -374,62 +226,60 @@ export default class GameScene extends Phaser.Scene {
     this.matter.body.setVelocity(this.ballBody, { x: 0, y: 0 });
     this.matter.body.setAngularVelocity(this.ballBody, 0);
     this.matter.body.setStatic(this.ballBody, true);
-    this._redrawBall(this.ballStartX, this.ballStartY, false);
+    this.ballSprite.setRotation(0);
+    this._updateBallSprite(this.ballStartX, this.ballStartY, false);
     this.ballPassedRimTop = false;
-    // 球閒置時預建局 → 下次射球只需等 nextBall，延遲大幅降低
     this._preCreateRound();
   }
 
   // ─── UI ───────────────────────────────────────────────────
   buildUI() {
     const w = GAME_WIDTH;
-    const barY = GAME_HEIGHT - 56;
 
-    // Top bar
-    this.add.rectangle(w / 2, 22, w, 44, 0x000000, 0.65).setDepth(20);
-    this.balanceText = this.add.text(14, 10, `餘額 $${this.balance.toLocaleString()}`, {
-      fontFamily: 'DM Mono, monospace', fontSize: '13px', color: '#ffffff', alpha: 0.7,
-    }).setDepth(20);
-    this.diffBtn = this.add.text(w - 14, 10, '簡單', {
-      fontFamily: 'Syne, sans-serif', fontSize: '13px', color: '#c9a84c',
-      backgroundColor: '#c9a84c22', padding: { x: 10, y: 4 },
-    }).setOrigin(1, 0).setInteractive({ useHandCursor: true }).setDepth(20);
+    // 底部欄圖片（最高層）
+    this._imgFull('ui-bottombar', 20);
+
+    // 動態數值：餘額（BALANCE 標題正下方）
+    this.balanceText = this.add.text(22, 800, `$${this.balance.toLocaleString()}`, {
+      fontFamily: 'DM Mono, monospace', fontSize: '15px',
+      fontStyle: 'bold', color: '#c9a84c',
+    }).setDepth(21);
+
+    // 動態數值：難度（MODE 標題正下方）
+    this.diffBtn = this.add.text(w / 2, 800, '簡單', {
+      fontFamily: 'DM Mono, monospace', fontSize: '15px',
+      fontStyle: 'bold', color: '#c9a84c',
+    }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true }).setDepth(21);
     this.diffBtn.on('pointerup', () => this.cycleDifficulty());
 
-    // Bottom bar
-    this.add.rectangle(w / 2, barY, w, 80, 0x000000, 0.80).setDepth(20);
-
-    this.add.text(14, GAME_HEIGHT - 82, '投注', {
-      fontFamily: 'DM Mono, monospace', fontSize: '11px', color: '#ffffff', alpha: 0.5,
-    }).setDepth(20);
-    this.betText = this.add.text(14, GAME_HEIGHT - 65, `$${this.betAmount}`, {
-      fontFamily: 'DM Mono, monospace', fontSize: '20px', color: '#ffffff',
-    }).setInteractive({ useHandCursor: true }).setDepth(20);
+    // 動態數值：投注（YOUR BET 標題正下方）
+    this.betText = this.add.text(w - 22, 800, `$${this.betAmount}`, {
+      fontFamily: 'DM Mono, monospace', fontSize: '15px',
+      fontStyle: 'bold', color: '#c9a84c',
+    }).setOrigin(1, 0).setInteractive({ useHandCursor: true }).setDepth(21);
     this.betText.on('pointerup', () => this.cycleBet());
-    this.betHint = this.add.text(14, GAME_HEIGHT - 42, '點擊更改', {
-      fontFamily: 'DM Mono, monospace', fontSize: '9px', color: '#c9a84c', alpha: 0.5,
-    }).setDepth(20);
 
-    // Bottom center: current multiplier
-    this.multText = this.add.text(w / 2, GAME_HEIGHT - 65, '1.0x', {
-      fontFamily: 'DM Mono, monospace', fontSize: '22px', color: '#c9a84c',
-    }).setOrigin(0.5, 0).setDepth(20);
+    // 倍率顯示（底部中間，投注欄上方）
+    this.multText = this.add.text(w / 2, 726, '1.0x', {
+      fontFamily: 'DM Mono, monospace', fontSize: '18px', color: '#c9a84c',
+    }).setOrigin(0.5, 1).setDepth(21);
 
-    // Dots (right side)
-    this.dotsContainer = this.add.container(w - 14, barY).setDepth(20);
+    // 進球點數（底部右側上方）
+    this.dotsContainer = this.add.container(w - 16, 720).setDepth(21);
     this.updateDots();
 
-    // Cashout button
-    this.cashoutBtn = this.add.text(w / 2, GAME_HEIGHT - 16, '', {
-      fontFamily: 'Syne, sans-serif', fontSize: '17px', color: '#080b10',
-      backgroundColor: '#c9a84c', padding: { x: 28, y: 10 },
-    }).setOrigin(0.5, 1).setInteractive({ useHandCursor: true }).setAlpha(0).setDepth(20);
+    // 兌現按鈕（底部中央，倍率上方）
+    this.cashoutBtn = this.add.text(w / 2, 716, '', {
+      fontFamily: 'DM Mono, monospace', fontSize: '16px', color: '#080b10',
+      backgroundColor: '#c9a84c', padding: { x: 24, y: 8 },
+    }).setOrigin(0.5, 1).setInteractive({ useHandCursor: true })
+      .setAlpha(0).setDepth(21);
     this.cashoutBtn.on('pointerup', () => this.cashout());
 
-    // Swipe hint
+    // 投球提示
     this.hintText = this.add.text(w / 2, COURT_FLOOR_Y - 50, '長壓球體上滑投球', {
-      fontFamily: 'Syne, sans-serif', fontSize: '12px', color: '#c9a84c', alpha: 0.45,
-    }).setOrigin(0.5).setDepth(20);
+      fontFamily: 'DM Mono, monospace', fontSize: '12px', color: '#c9a84c', alpha: 0.45,
+    }).setOrigin(0.5).setDepth(21);
   }
 
   updateDots() {
@@ -448,14 +298,14 @@ export default class GameScene extends Phaser.Scene {
     this.ledText.setText(`${mult}x`);
 
     if (this.ballsScored > 0) {
-      const cashout = Math.floor(this.betAmount * mult);
-      this.cashoutBtn.setText(`兌現 $${cashout}  →`);
+      const payout = Math.floor(this.betAmount * mult);
+      this.cashoutBtn.setText(`兌現 $${payout}  →`);
       this.tweens.add({ targets: this.cashoutBtn, alpha: 1, duration: 200 });
     }
   }
 
   updateBalanceDisplay() {
-    this.balanceText.setText(`餘額 $${this.balance.toLocaleString()}`);
+    this.balanceText.setText(`$${this.balance.toLocaleString()}`);
   }
 
   cycleBet() {
@@ -470,7 +320,6 @@ export default class GameScene extends Phaser.Scene {
     this.betAmount = this.betPresets[idx];
     this.betText.setText(`$${this.betAmount}`);
     this.tweens.add({ targets: this.betText, scaleX: 1.2, scaleY: 1.2, yoyo: true, duration: 80 });
-    // 投注改變 → 預建的局 betAmount 已過期，重建
     this.roundId = null;
     this._preCreateRound();
   }
@@ -480,13 +329,11 @@ export default class GameScene extends Phaser.Scene {
     this.betDeducted = true;
     this.balance -= this.betAmount;
     this.updateBalanceDisplay();
-    this.betHint.setAlpha(0);
   }
 
-  // ─── Difficulty ───────────────────────────────────────────
+  // ─── 難度切換 ─────────────────────────────────────────────
   cycleDifficulty() {
     if (this.gameState !== 'idle' || this.betDeducted) return;
-    // 難度改變 → 舊的預建局作廢
     this.roundId = null;
     const order = ['easy', 'normal', 'hard'];
     const next  = order[(order.indexOf(this.currentDifficulty) + 1) % 3];
@@ -502,91 +349,84 @@ export default class GameScene extends Phaser.Scene {
     this.gameState = 'transitioning';
     this.resetBall();
 
-    const proxy = { rimW: this.rimWidth, machineW: this.machineWidth };
+    // 更新物理牆壁
+    this.machineWidth = diff.machineWidth;
+    this._updateUpperWalls(diff.machineWidth);
+    this._rebuildAngledWalls(diff.machineWidth);
 
-    this.tweens.add({
-      targets: proxy,
-      rimW: diff.rimWidth, machineW: diff.machineWidth,
-      duration: 480, ease: 'Cubic.InOut',
-      onUpdate: () => {
-        this.rimGraphics.clear();
-        this.drawBackboard(diff.rimX, diff.rimY, proxy.rimW);
-        this._buildScoreboard(diff.rimX, diff.rimY, proxy.rimW);
-        this.drawRim(diff.rimX, diff.rimY, proxy.rimW);
-        this.drawNet(diff.rimX, diff.rimY, proxy.rimW);
-        this.drawCorridor(proxy.machineW);
-      },
-      onComplete: () => {
-        this.rimWidth    = diff.rimWidth;
-        this.machineWidth = diff.machineWidth;
-        this.rimCenterX  = diff.rimX;
-        this.rimCenterY  = diff.rimY;
-        this._updateRimPhysics(diff);
-        this._rebuildAngledWalls(diff.machineWidth);
+    // 更新籃框物理體
+    this.rimWidth   = diff.rimWidth;
+    this.rimCenterX = diff.rimX;
+    this.rimCenterY = diff.rimY;
+    this._updateRimPhysics(diff);
 
-        // 歸零視覺偏移
-        this.rimOffsetX = 0;
-        this.rimGraphics.x = 0;
-        this.netGraphics.x = 0;
-        if (this.ledText) this.ledText.x = diff.rimX;
+    this.rimOffsetX     = 0;
+    this.rimSeedOffsetX = 0;
+    this.rimImg.x       = IMG_CX;
+    this.netImg.x       = IMG_CX;
+    this.ledText.x      = ART.scoreboard.cx;
 
-        this.ballsScored = 0;
-        this.betDeducted = false;
-        this.betHint.setAlpha(0.5);
-        this.updateDots();
-        this.cashoutBtn.setAlpha(0);
-        this.multText.setText('1.0x');
-        if (this.ledText) this.ledText.setText('1.0x');
-        this.gameState = 'idle';
-      },
-    });
+    this.ballsScored = 0;
+    this.betDeducted = false;
+    this.updateDots();
+    this.cashoutBtn.setAlpha(0);
+    this.multText.setText('1.0x');
+    this.ledText.setText('1.0x');
+
+    this.gameState = 'idle';
+    this._preCreateRound();
+  }
+
+  _updateUpperWalls(machineW) {
+    const sideW  = (GAME_WIDTH - machineW) / 2;
+    const bwLeft  = sideW;
+    const bwRight = GAME_WIDTH - sideW;
+    this.matter.body.setPosition(this.upperLeftWall,  { x: bwLeft  - WALL_THICK / 2, y: BACK_WALL_BOTTOM_Y / 2 });
+    this.matter.body.setPosition(this.upperRightWall, { x: bwRight + WALL_THICK / 2, y: BACK_WALL_BOTTOM_Y / 2 });
   }
 
   _updateRimPhysics(diff) {
     this.matter.body.setPosition(this.leftRimBody,  { x: diff.rimX - diff.rimWidth / 2, y: diff.rimY });
     this.matter.body.setPosition(this.rightRimBody, { x: diff.rimX + diff.rimWidth / 2, y: diff.rimY });
-    this.matter.body.setPosition(this.goalSensor,   { x: diff.rimX, y: diff.rimY + 22 });
+    this.matter.body.setPosition(this.goalSensor,   { x: diff.rimX, y: diff.rimY + 15 });
   }
 
+  // ─── 籃框移動（normal / hard） ────────────────────────────
   _updateRimMovement(time) {
     const diff = DIFFICULTY[this.currentDifficulty];
     if (!diff.rimMove) {
       this.rimOffsetX = 0;
-      return;
-    }
-
-    const t = time * 0.001 * (diff.rimMoveSpeed / 100);
-
-    if (this.currentDifficulty === 'normal') {
-      // 規則正弦，慢速
-      this.rimOffsetX = Math.sin(t) * diff.rimMoveRange;
     } else {
-      // 困難：兩個不同頻率的正弦疊加，製造不規則感
-      this.rimOffsetX =
-        Math.sin(t * 1.0) * diff.rimMoveRange * 0.6 +
-        Math.sin(t * 1.9) * diff.rimMoveRange * 0.4;
+      const t = time * 0.001 * (diff.rimMoveSpeed / 100);
+      if (this.currentDifficulty === 'normal') {
+        this.rimOffsetX = Math.sin(t) * diff.rimMoveRange;
+      } else {
+        this.rimOffsetX =
+          Math.sin(t * 1.0) * diff.rimMoveRange * 0.6 +
+          Math.sin(t * 1.9) * diff.rimMoveRange * 0.4;
+      }
     }
 
-    const cx  = this.rimCenterX;
-    const cy  = this.rimCenterY;
-    const rw  = this.rimWidth;
-    const ox  = this.rimOffsetX + (this.rimSeedOffsetX ?? 0); // 動畫偏移 + seed偏移
+    const totalOx = this.rimOffsetX + (this.rimSeedOffsetX ?? 0);
+    const cx = this.rimCenterX;
+    const cy = this.rimCenterY;
+    const rw = this.rimWidth;
 
-    // 同步視覺圖層
-    this.rimGraphics.x = ox;
-    this.netGraphics.x = ox;
-    if (this.ledText) this.ledText.x = cx + ox;
+    // 視覺：整張圖片水平偏移（透明區域不顯示，只有籃框/籃網可見）
+    this.rimImg.x = IMG_CX + totalOx;
+    this.netImg.x = IMG_CX + totalOx;
+    this.ledText.x = ART.scoreboard.cx + totalOx;
 
-    // 同步物理碰撞體
-    this.matter.body.setPosition(this.leftRimBody,  { x: cx - rw / 2 + ox, y: cy });
-    this.matter.body.setPosition(this.rightRimBody, { x: cx + rw / 2 + ox, y: cy });
-    this.matter.body.setPosition(this.goalSensor,   { x: cx + ox, y: cy + 22 });
+    // 物理碰撞體
+    this.matter.body.setPosition(this.leftRimBody,  { x: cx - rw / 2 + totalOx, y: cy });
+    this.matter.body.setPosition(this.rightRimBody, { x: cx + rw / 2 + totalOx, y: cy });
+    this.matter.body.setPosition(this.goalSensor,   { x: cx + totalOx, y: cy + 15 });
   }
 
   // ─── Input ────────────────────────────────────────────────
   setupInput() {
-    this.dragStart    = null;
-    this.isDragging   = false;
+    this.dragStart  = null;
+    this.isDragging = false;
     this.input.on('pointerdown', this.onPointerDown, this);
     this.input.on('pointermove', this.onPointerMove, this);
     this.input.on('pointerup',   this.onPointerUp,   this);
@@ -598,7 +438,7 @@ export default class GameScene extends Phaser.Scene {
     if (Phaser.Math.Distance.Between(pointer.x, pointer.y, bx, by) < BALL_RADIUS * 2.8) {
       this.isDragging = true;
       this.dragStart  = { x: pointer.x, y: pointer.y, time: pointer.time };
-      this._redrawBall(bx, by, true);
+      this._updateBallSprite(bx, by, true);
       this.hintText.setAlpha(0);
     }
   }
@@ -606,7 +446,7 @@ export default class GameScene extends Phaser.Scene {
   onPointerMove(pointer) {
     if (!this.isDragging) return;
     const { x, y } = this.ballBody.position;
-    this._redrawBall(x, y, true);
+    this._updateBallSprite(x, y, true);
   }
 
   onPointerUp(pointer) {
@@ -616,28 +456,28 @@ export default class GameScene extends Phaser.Scene {
     const dy = pointer.y - this.dragStart.y;
     if (dy > -30) {
       const { x, y } = this.ballBody.position;
-      this._redrawBall(x, y, false);
+      this._updateBallSprite(x, y, false);
       return;
     }
     this.shoot(dx, dy);
   }
 
+  // ─── 射球 ─────────────────────────────────────────────────
   shoot(dx, dy) {
     this.lockBet();
     this.gameState = 'flying';
 
-    // ── 立即射球，零延遲 ──────────────────────────────────
+    // 立即射球
     this.matter.body.setStatic(this.ballBody, false);
     const vx = Phaser.Math.Clamp(dx * 0.30, -25, 25);
     const vy = Phaser.Math.Clamp(dy * 0.30, -55, -8);
     this.matter.body.setVelocity(this.ballBody, { x: vx, y: vy });
     this.ballPassedRimTop = false;
 
-    // ── 背景取物理參數（球飛行中套用，碰籃框前就能到） ────
+    // 背景取物理參數
     this._fetchBallParams();
   }
 
-  /** 建局 + 取本球物理參數（背景執行，不阻斷射球） */
   async _fetchBallParams() {
     try {
       if (!this.roundId) {
@@ -646,17 +486,15 @@ export default class GameScene extends Phaser.Scene {
         console.log('[API] createRound →', this.roundId);
       }
       const ball = await api.nextBall(this.roundId);
-      // 只在球還在飛行中才套用（避免混到下一球）
       if (this.gameState === 'flying') {
         this._applyPhysicsParams(ball.params);
-        console.log('[API] params applied nonce', ball.nonce, ball.params);
+        console.log('[API] params nonce', ball.nonce, ball.params);
       }
     } catch (e) {
-      console.warn('[API] _fetchBallParams 失敗（用預設物理）:', e.message);
+      console.warn('[API] _fetchBallParams 失敗:', e.message);
     }
   }
 
-  /** 閒置時預先建局，讓下次射球只需等 nextBall（更快） */
   async _preCreateRound() {
     if (this.roundId || this._creating) return;
     this._creating = true;
@@ -670,19 +508,13 @@ export default class GameScene extends Phaser.Scene {
     this._creating = false;
   }
 
-  /** 將後端物理參數套用到 Matter.js 物理體 */
   _applyPhysicsParams(params) {
-    // 籃框彈性
     if (this.leftRimBody)  this.leftRimBody.restitution  = params.rimElasticity;
     if (this.rightRimBody) this.rightRimBody.restitution = params.rimElasticity;
-
-    // 牆壁彈性（上下四面牆）
     if (this.upperLeftWall)  this.upperLeftWall.restitution  = params.leftWall;
     if (this.lowerLeftWall)  this.lowerLeftWall.restitution  = params.leftWall;
     if (this.upperRightWall) this.upperRightWall.restitution = params.rightWall;
     if (this.lowerRightWall) this.lowerRightWall.restitution = params.rightWall;
-
-    // 籃框位置偏移（seed 決定，疊加在搖擺偏移上）
     this.rimSeedOffsetX = params.rimOffset ?? 0;
   }
 
@@ -698,16 +530,18 @@ export default class GameScene extends Phaser.Scene {
 
   // ─── Update ───────────────────────────────────────────────
   update(time) {
-    // 籃框移動（所有 gameState 都持續，除了過渡期）
     if (this.gameState !== 'transitioning') {
       this._updateRimMovement(time);
     }
 
     if (this.gameState !== 'flying') return;
-    const { x: bx, y: by } = this.ballBody.position;
-    this._redrawBall(bx, by, false);
 
-    // Goal detection（動畫偏移 + seed偏移）
+    const { x: bx, y: by } = this.ballBody.position;
+    this._updateBallSprite(bx, by, false);
+    // 球自轉
+    this.ballSprite.rotation = this.ballBody.angle;
+
+    // 進球判定
     const totalOx = this.rimOffsetX + (this.rimSeedOffsetX ?? 0);
     if (!this.ballPassedRimTop && by < this.rimCenterY) this.ballPassedRimTop = true;
     if (this.ballPassedRimTop && by > this.rimCenterY + 10 && by < this.rimCenterY + 55) {
@@ -724,27 +558,28 @@ export default class GameScene extends Phaser.Scene {
     if (this.gameState !== 'flying') return;
     this.gameState = 'scored';
     this.ballsScored++;
-    this.rimSeedOffsetX = 0; // 本球結束，清除 seed 偏移
+    this.rimSeedOffsetX = 0;
 
-    // 後端記錄進球（背景執行，不阻斷動畫）
-    if (this.roundId) {
-      api.recordScore(this.roundId)
-        .then(r => console.log('[API] recordScore → x', r.multiplier, '| 預計兌現:', r.potentialPayout))
-        .catch(e => console.warn('[API] recordScore 失敗:', e.message));
-    }
-
+    // 籃網搖動效果
     this.tweens.add({
-      targets: this.netGraphics, x: { from: -3, to: 3 },
+      targets: this.netImg,
+      x: { from: IMG_CX - 3, to: IMG_CX + 3 },
       yoyo: true, repeat: 4, duration: 55,
     });
+
+    // 後端記錄（背景）
+    if (this.roundId) {
+      api.recordScore(this.roundId)
+        .then(r => console.log('[API] recordScore ×', r.multiplier))
+        .catch(e => console.warn('[API] recordScore:', e.message));
+    }
 
     this.updateMultiplierDisplay();
     this.updateDots();
 
-    // LED pop animation
-    if (this.ledText) {
-      this.tweens.add({ targets: this.ledText, scaleX: 1.25, scaleY: 1.25, yoyo: true, duration: 130 });
-    }
+    // LED 彈跳
+    this.tweens.add({ targets: this.ledText, scaleX: 1.3, scaleY: 1.3, yoyo: true, duration: 130 });
+
     this.tweens.add({
       targets: this.multText, scaleX: 1.3, scaleY: 1.3, yoyo: true, duration: 120,
       onComplete: () => {
@@ -758,20 +593,19 @@ export default class GameScene extends Phaser.Scene {
     this.gameState = 'failed';
     this.rimSeedOffsetX = 0;
 
-    // 後端記錄失敗（背景執行）
     if (this.roundId) {
       const rid = this.roundId;
       this.roundId = null;
       api.fail(rid)
         .then(r => console.log('[API] fail → serverSeed:', r.serverSeed))
-        .catch(e => console.warn('[API] fail 失敗:', e.message));
+        .catch(e => console.warn('[API] fail:', e.message));
     }
 
     const overlay = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, COLORS.failure, 0.35).setDepth(30);
     this.tweens.add({ targets: overlay, alpha: 0, duration: 600, onComplete: () => overlay.destroy() });
 
     const failText = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2, `沒進\n-$${this.betAmount}`, {
-      fontFamily: 'Syne, sans-serif', fontSize: '28px', color: '#c95a4c', align: 'center',
+      fontFamily: 'DM Mono, monospace', fontSize: '28px', color: '#c95a4c', align: 'center',
     }).setOrigin(0.5).setAlpha(0).setDepth(30);
 
     this.tweens.add({
@@ -782,21 +616,19 @@ export default class GameScene extends Phaser.Scene {
 
   async cashout() {
     if (this.gameState !== 'idle' || this.ballsScored === 0) return;
-    this.gameState = 'cashing'; // 防止重複觸發
+    this.gameState = 'cashing';
 
-    // 本地預計算（樂觀顯示）
     const mults  = MULTIPLIERS[this.currentDifficulty];
     let payout   = Math.floor(this.betAmount * mults[Math.min(this.ballsScored, mults.length - 1)]);
 
-    // 後端兌現
     if (this.roundId) {
       try {
         const result = await api.cashout(this.roundId);
         payout = result.payout;
-        console.log('[API] cashout → payout:', payout, '| serverSeed:', result.serverSeed);
+        console.log('[API] cashout payout:', payout, '| seed:', result.serverSeed);
         this.roundId = null;
       } catch (e) {
-        console.warn('[API] cashout 失敗（使用本地計算）:', e.message);
+        console.warn('[API] cashout 失敗:', e.message);
         this.roundId = null;
       }
     }
@@ -816,16 +648,15 @@ export default class GameScene extends Phaser.Scene {
   }
 
   endRound() {
-    this.roundId     = null;
+    this.roundId        = null;
     this.rimSeedOffsetX = 0;
-    this.ballsScored = 0;
-    this.betDeducted = false;
+    this.ballsScored    = 0;
+    this.betDeducted    = false;
     this.updateDots();
     this.multText.setText('1.0x');
-    if (this.ledText) this.ledText.setText('1.0x');
+    this.ledText.setText('1.0x');
     this.cashoutBtn.setAlpha(0);
     this.hintText.setAlpha(0.45);
-    this.betHint.setAlpha(0.5);
     while (this.betAmount > this.balance && this.betIndex > 0) {
       this.betIndex--;
       this.betAmount = this.betPresets[this.betIndex];
