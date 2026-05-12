@@ -64,6 +64,22 @@ export default class GameScene extends Phaser.Scene {
     this.buildBall();
     this.buildUI();
     this.setupInput();
+    // 撐滿螢幕（無黑邊），保持所有遊戲座標不變
+    this._fitCamera();
+    this.scale.on('resize', this._fitCamera, this);
+  }
+
+  // ─── 填滿螢幕 ────────────────────────────────────────────
+  /**
+   * 用 camera zoom 讓 390×844 的遊戲世界撐滿任何尺寸的螢幕。
+   * 取 max(scaleX, scaleY) → ENVELOP 效果：四邊無黑邊，
+   * 當長寬比不完全一致時極小量裁切（正常手機幾乎感覺不到）。
+   */
+  _fitCamera() {
+    const { width, height } = this.scale;
+    const zoom = Math.max(width / GAME_WIDTH, height / GAME_HEIGHT);
+    this.cameras.main.setZoom(zoom);
+    this.cameras.main.centerOn(GAME_WIDTH / 2, GAME_HEIGHT / 2);
   }
 
   // ─── 共用：全畫布圖片貼法 ─────────────────────────────────
