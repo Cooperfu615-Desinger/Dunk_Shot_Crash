@@ -161,7 +161,12 @@ export default class GameScene extends Phaser.Scene {
    */
   _fitCamera() {
     const { width, height } = this.scale;
-    const zoom = Math.max(width / GAME_WIDTH, height / GAME_HEIGHT);
+    const scaleX = width / GAME_WIDTH;
+    const scaleY = height / GAME_HEIGHT;
+    // 手機（≤600px）：ENVELOP 撐滿螢幕，無黑邊
+    // 桌機 / 平板：FIT 完整顯示，保持比例
+    const isMobile = width <= 600;
+    const zoom = isMobile ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);
     this.cameras.main.setZoom(zoom);
     this.cameras.main.centerOn(GAME_WIDTH / 2, GAME_HEIGHT / 2);
   }
