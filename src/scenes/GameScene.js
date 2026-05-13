@@ -15,6 +15,13 @@ const BALL_R_NEAR = 28;   // 近端（靠近玩家）視覺半徑
 const RIM_W = 20;
 const RIM_H = 17;
 
+// 地板前後分界（中間分割點）
+const FLOOR_MID_Y = 653;  // (BACK_WALL_BOTTOM_Y 550 + COURT_FLOOR_Y 756) / 2
+
+// 地板摩擦係數設定
+const FLOOR_REAR  = { friction: 0.60, restitution: 0.25 };  // 後段（籃框下方）：球落地後能量消耗快
+const FLOOR_FRONT = { friction: 0.40, restitution: 0.45 };  // 前段（玩家區）：正常彈跳
+
 // 籃板
 const BACKBOARD_Y     = 285;  // 物理位置（比籃框 341 高約 56px）
 const BACKBOARD_THICK = 10;
@@ -143,7 +150,8 @@ export default class GameScene extends Phaser.Scene {
     };
 
     poly(this.ceilingBody,    DBG.ceiling);
-    poly(this.floorBody,      DBG.floor);
+    poly(this.rearFloorBody,  DBG.floor);
+    poly(this.frontFloorBody, DBG.floor);
     poly(this.leftWallBlock,  DBG.wallV);
     poly(this.rightWallBlock, DBG.wallV);
     poly(this.lowerLeftWall,  DBG.wallA);
@@ -195,10 +203,18 @@ export default class GameScene extends Phaser.Scene {
     this.ceilingBody = this.matter.add.rectangle(GAME_WIDTH / 2, -10, GAME_WIDTH, 20, {
       isStatic: true, label: 'ceiling', friction: 0, restitution: 0.55,
     });
-    // 物理：地板（摩擦大，落地不亂滾）
-    this.floorBody = this.matter.add.rectangle(GAME_WIDTH / 2, COURT_FLOOR_Y, GAME_WIDTH, 20, {
-      isStatic: true, label: 'floor', friction: 0.40, restitution: 0.45,
-    });
+    // 物理：後段地板（y=550~653，籃框正下方，高摩擦讓球快速停下）
+    const rearH  = FLOOR_MID_Y - BACK_WALL_BOTTOM_Y;
+    this.rearFloorBody = this.matter.add.rectangle(
+      GAME_WIDTH / 2, BACK_WALL_BOTTOM_Y + rearH / 2, GAME_WIDTH, rearH,
+      { isStatic: true, label: 'floor', ...FLOOR_REAR }
+    );
+    // 物理：前段地板（y=653~756，玩家區，正常彈跳）
+    const frontH = COURT_FLOOR_Y - FLOOR_MID_Y;
+    this.frontFloorBody = this.matter.add.rectangle(
+      GAME_WIDTH / 2, FLOOR_MID_Y + frontH / 2, GAME_WIDTH, frontH,
+      { isStatic: true, label: 'floor', ...FLOOR_FRONT }
+    );
 
     // 物理：上段側牆（實心矩形，完整填滿走廊外側區域）
     this.leftWallBlock  = null;
