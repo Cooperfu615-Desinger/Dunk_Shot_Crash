@@ -152,9 +152,8 @@ export default class GameScene extends Phaser.Scene {
       g.strokeCircle(body.position.x, body.position.y, body.circleRadius ?? BALL_RADIUS);
     };
 
-    poly(this.ceilingBody,    DBG.ceiling);
-    poly(this.rearFloorBody,  DBG.floor);
-    poly(this.frontFloorBody, DBG.floor);
+    poly(this.ceilingBody, DBG.ceiling);
+    poly(this.floorBody,   DBG.floor);
     poly(this.leftWallBlock,  DBG.wallV);
     poly(this.rightWallBlock, DBG.wallV);
     poly(this.lowerLeftWall,  DBG.wallA);
@@ -206,17 +205,10 @@ export default class GameScene extends Phaser.Scene {
     this.ceilingBody = this.matter.add.rectangle(GAME_WIDTH / 2, 80, GAME_WIDTH, 20, {
       isStatic: true, label: 'ceiling', friction: 0, restitution: 0.55,
     });
-    // 物理：後段地板（y=550~653，籃框正下方，高摩擦讓球快速停下）
-    // isSensor=true 讓球在 idle 時不被地板擋住，投球後再啟動碰撞
-    const rearH  = FLOOR_MID_Y - BACK_WALL_BOTTOM_Y;
-    this.rearFloorBody = this.matter.add.rectangle(
-      GAME_WIDTH / 2, BACK_WALL_BOTTOM_Y + rearH / 2, GAME_WIDTH, rearH,
-      { isStatic: true, label: 'floor', isSensor: true, ...FLOOR_REAR }
-    );
-    const frontH = COURT_FLOOR_Y - FLOOR_MID_Y;
-    this.frontFloorBody = this.matter.add.rectangle(
-      GAME_WIDTH / 2, FLOOR_MID_Y + frontH / 2, GAME_WIDTH, frontH,
-      { isStatic: true, label: 'floor', isSensor: true, ...FLOOR_FRONT }
+    // 物理：地板（單一薄板，球落地後觸發失敗）
+    this.floorBody = this.matter.add.rectangle(
+      GAME_WIDTH / 2, COURT_FLOOR_Y, GAME_WIDTH, 20,
+      { isStatic: true, label: 'floor', ...FLOOR_FRONT }
     );
 
     // 物理：上段側牆（實心矩形，完整填滿走廊外側區域）
@@ -367,9 +359,6 @@ export default class GameScene extends Phaser.Scene {
     this.ballSprite.setRotation(0);
     this._updateBallSprite(this.ballStartX, this.ballStartY, false);
     this.ballPassedRimTop = false;
-    // 球重置後關閉地板碰撞，讓球靜止在 idle 位置
-    this.rearFloorBody.isSensor  = true;
-    this.frontFloorBody.isSensor = true;
     this._preCreateRound();
   }
 
@@ -615,10 +604,6 @@ export default class GameScene extends Phaser.Scene {
   shoot(dx, dy) {
     this.lockBet();
     this.gameState = 'flying';
-
-    // 投球後啟動地板碰撞
-    this.rearFloorBody.isSensor  = false;
-    this.frontFloorBody.isSensor = false;
 
     // 立即射球
     this.matter.body.setStatic(this.ballBody, false);
