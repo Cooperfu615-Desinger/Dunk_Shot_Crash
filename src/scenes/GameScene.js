@@ -142,8 +142,8 @@ export default class GameScene extends Phaser.Scene {
 
     poly(this.ceilingBody,    DBG.ceiling);
     poly(this.floorBody,      DBG.floor);
-    poly(this.upperLeftWall,  DBG.wallV);
-    poly(this.upperRightWall, DBG.wallV);
+    poly(this.leftWallBlock,  DBG.wallV);
+    poly(this.rightWallBlock, DBG.wallV);
     poly(this.lowerLeftWall,  DBG.wallA);
     poly(this.lowerRightWall, DBG.wallA);
     poly(this.backboardBody,  DBG.backboard);
@@ -198,9 +198,10 @@ export default class GameScene extends Phaser.Scene {
       isStatic: true, label: 'floor', friction: 0.40, restitution: 0.45,
     });
 
-    // 物理：上段垂直牆（後牆區域）
-    this.upperLeftWall  = this._makeVerticalWall('left',  diff.machineWidth);
-    this.upperRightWall = this._makeVerticalWall('right', diff.machineWidth);
+    // 物理：上段側牆（實心矩形，完整填滿走廊外側區域）
+    this.leftWallBlock  = null;
+    this.rightWallBlock = null;
+    this._rebuildSideWallBlocks(diff.machineWidth);
 
     // 物理：下段斜牆（走廊收斂區域）
     this.lowerLeftWall  = null;
@@ -208,15 +209,21 @@ export default class GameScene extends Phaser.Scene {
     this._rebuildAngledWalls(diff.machineWidth);
   }
 
-  _makeVerticalWall(side, machineW) {
+  /** 重建上段側牆實心矩形（難度切換時寬度改變，需重建） */
+  _rebuildSideWallBlocks(machineW) {
+    if (this.leftWallBlock)  this.matter.world.remove(this.leftWallBlock);
+    if (this.rightWallBlock) this.matter.world.remove(this.rightWallBlock);
     const sideW = (GAME_WIDTH - machineW) / 2;
-    const x     = side === 'left'
-      ? sideW - WALL_THICK / 2
-      : GAME_WIDTH - sideW + WALL_THICK / 2;
-    const halfH = BACK_WALL_BOTTOM_Y / 2;
-    return this.matter.add.rectangle(x, halfH, WALL_THICK, BACK_WALL_BOTTOM_Y, {
-      isStatic: true, label: 'wall', friction: 0.05, restitution: 0.72,  // 幾乎無摩擦，滑順反彈
-    });
+    // 左側：x=0 ~ sideW，整段高度 BACK_WALL_BOTTOM_Y
+    this.leftWallBlock = this.matter.add.rectangle(
+      sideW / 2, BACK_WALL_BOTTOM_Y / 2, sideW, BACK_WALL_BOTTOM_Y,
+      { isStatic: true, label: 'wall', friction: 0.05, restitution: 0.72 }
+    );
+    // 右側：x=(GAME_WIDTH-sideW) ~ GAME_WIDTH，整段高度
+    this.rightWallBlock = this.matter.add.rectangle(
+      GAME_WIDTH - sideW / 2, BACK_WALL_BOTTOM_Y / 2, sideW, BACK_WALL_BOTTOM_Y,
+      { isStatic: true, label: 'wall', friction: 0.05, restitution: 0.72 }
+    );
   }
 
   _rebuildAngledWalls(machineW) {
@@ -485,11 +492,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _updateUpperWalls(machineW) {
-    const sideW  = (GAME_WIDTH - machineW) / 2;
-    const bwLeft  = sideW;
-    const bwRight = GAME_WIDTH - sideW;
-    this.matter.body.setPosition(this.upperLeftWall,  { x: bwLeft  - WALL_THICK / 2, y: BACK_WALL_BOTTOM_Y / 2 });
-    this.matter.body.setPosition(this.upperRightWall, { x: bwRight + WALL_THICK / 2, y: BACK_WALL_BOTTOM_Y / 2 });
+    this._rebuildSideWallBlocks(machineW);
   }
 
   _updateRimPhysics(diff) {
@@ -626,11 +629,11 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _applyPhysicsParams(params) {
-    if (this.leftRimBody)  this.leftRimBody.restitution  = params.rimElasticity;
-    if (this.rightRimBody) this.rightRimBody.restitution = params.rimElasticity;
-    if (this.upperLeftWall)  this.upperLeftWall.restitution  = params.leftWall;
+    if (this.leftRimBody)   this.leftRimBody.restitution   = params.rimElasticity;
+    if (this.rightRimBody)  this.rightRimBody.restitution  = params.rimElasticity;
+    if (this.leftWallBlock)  this.leftWallBlock.restitution  = params.leftWall;
     if (this.lowerLeftWall)  this.lowerLeftWall.restitution  = params.leftWall;
-    if (this.upperRightWall) this.upperRightWall.restitution = params.rightWall;
+    if (this.rightWallBlock) this.rightWallBlock.restitution = params.rightWall;
     if (this.lowerRightWall) this.lowerRightWall.restitution = params.rightWall;
     this.rimSeedOffsetX = params.rimOffset ?? 0;
   }
