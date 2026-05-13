@@ -15,6 +15,9 @@ const BALL_R_NEAR = 28;   // 近端（靠近玩家）視覺半徑
 const RIM_W = 20;
 const RIM_H = 17;
 
+// 機台側牆頂部（走廊側牆從這裡開始，不延伸到天花板）
+const MACHINE_TOP_Y = 140;
+
 // 地板前後分界（中間分割點）
 const FLOOR_MID_Y = 653;  // (BACK_WALL_BOTTOM_Y 550 + COURT_FLOOR_Y 756) / 2
 
@@ -227,19 +230,21 @@ export default class GameScene extends Phaser.Scene {
     this._rebuildAngledWalls(diff.machineWidth);
   }
 
-  /** 重建上段側牆實心矩形（難度切換時寬度改變，需重建） */
+  /** 重建上段側牆實心矩形（從機台頂部 MACHINE_TOP_Y 到 BACK_WALL_BOTTOM_Y） */
   _rebuildSideWallBlocks(machineW) {
     if (this.leftWallBlock)  this.matter.world.remove(this.leftWallBlock);
     if (this.rightWallBlock) this.matter.world.remove(this.rightWallBlock);
-    const sideW = (GAME_WIDTH - machineW) / 2;
-    // 左側：x=0 ~ sideW，整段高度 BACK_WALL_BOTTOM_Y
+    const sideW  = (GAME_WIDTH - machineW) / 2;
+    const wallH  = BACK_WALL_BOTTOM_Y - MACHINE_TOP_Y;   // 不延伸到天花板
+    const wallCY = MACHINE_TOP_Y + wallH / 2;
+    // 左側：x=0 ~ sideW
     this.leftWallBlock = this.matter.add.rectangle(
-      sideW / 2, BACK_WALL_BOTTOM_Y / 2, sideW, BACK_WALL_BOTTOM_Y,
+      sideW / 2, wallCY, sideW, wallH,
       { isStatic: true, label: 'wall', friction: 0.05, restitution: 0.72 }
     );
-    // 右側：x=(GAME_WIDTH-sideW) ~ GAME_WIDTH，整段高度
+    // 右側：x=(GAME_WIDTH-sideW) ~ GAME_WIDTH
     this.rightWallBlock = this.matter.add.rectangle(
-      GAME_WIDTH - sideW / 2, BACK_WALL_BOTTOM_Y / 2, sideW, BACK_WALL_BOTTOM_Y,
+      GAME_WIDTH - sideW / 2, wallCY, sideW, wallH,
       { isStatic: true, label: 'wall', friction: 0.05, restitution: 0.72 }
     );
   }
