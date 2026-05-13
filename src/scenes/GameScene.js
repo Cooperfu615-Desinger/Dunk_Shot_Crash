@@ -8,10 +8,12 @@ import * as api from '../api/roundApi.js';
 
 // ─── 常數 ─────────────────────────────────────────────────
 const WALL_THICK  = 16;
-const RIM_THICK   = 8;
 const BALL_RADIUS = 22;
 const BALL_R_FAR  = 15;   // 遠端（靠近籃框）視覺半徑
 const BALL_R_NEAR = 28;   // 近端（靠近玩家）視覺半徑
+// 籃框碰撞體（對應美術 art 40×34，遊戲座標各 ÷2）
+const RIM_W = 20;
+const RIM_H = 17;
 
 // 籃板
 const BACKBOARD_Y     = 285;  // 物理位置（比籃框 341 高約 56px）
@@ -272,18 +274,18 @@ export default class GameScene extends Phaser.Scene {
       shadow:     { offsetX: 0, offsetY: 0, color: '#ff0000', blur: 14, fill: true },
     }).setOrigin(0.5).setDepth(10);
 
-    // 物理：籃框左右碰撞體（略有摩擦，邊框打到不會彈太乾）
+    // 物理：籃框左右碰撞體（寬扁矩形，對應美術籃框兩端橫桿）
     this.leftRimBody = this.matter.add.rectangle(
-      cx - rw / 2, cy, RIM_THICK, RIM_THICK,
+      cx - rw / 2, cy, RIM_W, RIM_H,
       { isStatic: true, label: 'rim', friction: 0.15, restitution: 0.55 }
     );
     this.rightRimBody = this.matter.add.rectangle(
-      cx + rw / 2, cy, RIM_THICK, RIM_THICK,
+      cx + rw / 2, cy, RIM_W, RIM_H,
       { isStatic: true, label: 'rim', friction: 0.15, restitution: 0.55 }
     );
-    // 物理：進球感應器
+    // 物理：進球感應器（剛好夾在兩端橫桿內緣之間）
     this.goalSensor = this.matter.add.rectangle(
-      cx, cy + 15, rw - 16, 10,
+      cx, cy + 15, rw - RIM_W, 10,
       { isStatic: true, isSensor: true, label: 'goal' }
     );
     // 物理：籃板（摩擦大，打板反彈不會太遠，適合打板球）
