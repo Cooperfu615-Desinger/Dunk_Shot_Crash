@@ -199,8 +199,8 @@ export default class GameScene extends Phaser.Scene {
     // 層次 1：籃球機本體（中間透明，球在裡面玩）
     this._imgFull('panel-overlay', 1);
 
-    // 物理：天花板（防止球飛出頂部）
-    this.ceilingBody = this.matter.add.rectangle(GAME_WIDTH / 2, -10, GAME_WIDTH, 20, {
+    // 物理：天花板（y=80，限制球不飛太高，射太用力會彈回）
+    this.ceilingBody = this.matter.add.rectangle(GAME_WIDTH / 2, 80, GAME_WIDTH, 20, {
       isStatic: true, label: 'ceiling', friction: 0, restitution: 0.55,
     });
     // 物理：後段地板（y=550~653，籃框正下方，高摩擦讓球快速停下）
