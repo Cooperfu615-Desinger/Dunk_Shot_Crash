@@ -207,16 +207,16 @@ export default class GameScene extends Phaser.Scene {
       isStatic: true, label: 'ceiling', friction: 0, restitution: 0.55,
     });
     // 物理：後段地板（y=550~653，籃框正下方，高摩擦讓球快速停下）
+    // isSensor=true 讓球在 idle 時不被地板擋住，投球後再啟動碰撞
     const rearH  = FLOOR_MID_Y - BACK_WALL_BOTTOM_Y;
     this.rearFloorBody = this.matter.add.rectangle(
       GAME_WIDTH / 2, BACK_WALL_BOTTOM_Y + rearH / 2, GAME_WIDTH, rearH,
-      { isStatic: true, label: 'floor', ...FLOOR_REAR }
+      { isStatic: true, label: 'floor', isSensor: true, ...FLOOR_REAR }
     );
-    // 物理：前段地板（y=653~756，玩家區，正常彈跳）
     const frontH = COURT_FLOOR_Y - FLOOR_MID_Y;
     this.frontFloorBody = this.matter.add.rectangle(
       GAME_WIDTH / 2, FLOOR_MID_Y + frontH / 2, GAME_WIDTH, frontH,
-      { isStatic: true, label: 'floor', ...FLOOR_FRONT }
+      { isStatic: true, label: 'floor', isSensor: true, ...FLOOR_FRONT }
     );
 
     // 物理：上段側牆（實心矩形，完整填滿走廊外側區域）
@@ -273,9 +273,9 @@ export default class GameScene extends Phaser.Scene {
   // ─── Rim + Backboard（圖片） ──────────────────────────────
   buildRim() {
     const diff = DIFFICULTY[this.currentDifficulty];
-    const cx = diff.rimX;   // 195
-    const cy = diff.rimY;   // 341（校準至圖片）
-    const rw = diff.rimWidth;
+    const cx = diff.rimX;           // 195
+    const cy = diff.rimY;           // 341（校準至圖片）
+    const ro = diff.rimBodyOffset;  // 碰撞體距中心距離
 
     // 層次 2：籃板
     this._imgFull('backboard', 2);
@@ -297,24 +297,25 @@ export default class GameScene extends Phaser.Scene {
 
     // 物理：籃框左右碰撞體（寬扁矩形，對應美術籃框兩端橫桿）
     this.leftRimBody = this.matter.add.rectangle(
-      cx - rw / 2, cy, RIM_W, RIM_H,
+      cx - ro, cy, RIM_W, RIM_H,
       { isStatic: true, label: 'rim', friction: 0.15, restitution: 0.55 }
     );
     this.rightRimBody = this.matter.add.rectangle(
-      cx + rw / 2, cy, RIM_W, RIM_H,
+      cx + ro, cy, RIM_W, RIM_H,
       { isStatic: true, label: 'rim', friction: 0.15, restitution: 0.55 }
     );
-    // 物理：進球感應器（剛好夾在兩端橫桿內緣之間）
+    // 物理：進球感應器（對應美術內緣 28px，僅作 debug 顯示用）
     this.goalSensor = this.matter.add.rectangle(
-      cx, cy + 15, rw - RIM_W, 10,
+      cx, cy + 12, 28, 8,
       { isStatic: true, isSensor: true, label: 'goal' }
     );
     // 物理：籃板（摩擦大，打板反彈不會太遠，適合打板球）
     this.backboardBody = this._createBackboard(diff.machineWidth);
 
-    this.rimCenterX = cx;
-    this.rimCenterY = cy;
-    this.rimWidth   = rw;
+    this.rimCenterX    = cx;
+    this.rimCenterY    = cy;
+    this.rimBodyOffset = ro;
+    this.scoringHalf   = diff.scoringHalf;
   }
 
   // ─── Ball（圖片精靈） ─────────────────────────────────────
@@ -366,6 +367,9 @@ export default class GameScene extends Phaser.Scene {
     this.ballSprite.setRotation(0);
     this._updateBallSprite(this.ballStartX, this.ballStartY, false);
     this.ballPassedRimTop = false;
+    // 球重置後關閉地板碰撞，讓球靜止在 idle 位置
+    this.rearFloorBody.isSensor  = true;
+    this.frontFloorBody.isSensor = true;
     this._preCreateRound();
   }
 
@@ -491,8 +495,7 @@ export default class GameScene extends Phaser.Scene {
     this._updateUpperWalls(diff.machineWidth);
     this._rebuildAngledWalls(diff.machineWidth);
 
-    // 更新籃框物理體
-    this.rimWidth   = diff.rimWidth;
+    // 更新籃框物理體（rimBodyOffset/scoringHalf 在 _updateRimPhysics 內更新）
     this.rimCenterX = diff.rimX;
     this.rimCenterY = diff.rimY;
     this._updateRimPhysics(diff);
@@ -519,9 +522,12 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _updateRimPhysics(diff) {
-    this.matter.body.setPosition(this.leftRimBody,  { x: diff.rimX - diff.rimWidth / 2, y: diff.rimY });
-    this.matter.body.setPosition(this.rightRimBody, { x: diff.rimX + diff.rimWidth / 2, y: diff.rimY });
-    this.matter.body.setPosition(this.goalSensor,   { x: diff.rimX, y: diff.rimY + 15 });
+    const ro = diff.rimBodyOffset;
+    this.matter.body.setPosition(this.leftRimBody,  { x: diff.rimX - ro, y: diff.rimY });
+    this.matter.body.setPosition(this.rightRimBody, { x: diff.rimX + ro, y: diff.rimY });
+    this.matter.body.setPosition(this.goalSensor,   { x: diff.rimX, y: diff.rimY + 12 });
+    this.rimBodyOffset = ro;
+    this.scoringHalf   = diff.scoringHalf;
     // 籃板：寬度隨難度改變，需重建
     if (this.backboardBody) this.matter.world.remove(this.backboardBody);
     this.backboardBody = this._createBackboard(diff.machineWidth);
@@ -553,7 +559,7 @@ export default class GameScene extends Phaser.Scene {
     const totalOx = this.rimOffsetX + (this.rimSeedOffsetX ?? 0);
     const cx = this.rimCenterX;
     const cy = this.rimCenterY;
-    const rw = this.rimWidth;
+    const ro = this.rimBodyOffset;
 
     // 視覺：整張圖片水平偏移（透明區域不顯示，只有籃框/籃網可見）
     this.rimImg.x = IMG_CX + totalOx;
@@ -561,9 +567,9 @@ export default class GameScene extends Phaser.Scene {
     this.ledText.x = ART.scoreboard.cx + totalOx;
 
     // 物理碰撞體
-    this.matter.body.setPosition(this.leftRimBody,  { x: cx - rw / 2 + totalOx, y: cy });
-    this.matter.body.setPosition(this.rightRimBody, { x: cx + rw / 2 + totalOx, y: cy });
-    this.matter.body.setPosition(this.goalSensor,   { x: cx + totalOx, y: cy + 15 });
+    this.matter.body.setPosition(this.leftRimBody,  { x: cx - ro + totalOx, y: cy });
+    this.matter.body.setPosition(this.rightRimBody, { x: cx + ro + totalOx, y: cy });
+    this.matter.body.setPosition(this.goalSensor,   { x: cx + totalOx, y: cy + 12 });
   }
 
   // ─── Input ────────────────────────────────────────────────
@@ -609,6 +615,10 @@ export default class GameScene extends Phaser.Scene {
   shoot(dx, dy) {
     this.lockBet();
     this.gameState = 'flying';
+
+    // 投球後啟動地板碰撞
+    this.rearFloorBody.isSensor  = false;
+    this.frontFloorBody.isSensor = false;
 
     // 立即射球
     this.matter.body.setStatic(this.ballBody, false);
@@ -690,8 +700,8 @@ export default class GameScene extends Phaser.Scene {
     const totalOx = this.rimOffsetX + (this.rimSeedOffsetX ?? 0);
     if (!this.ballPassedRimTop && by < this.rimCenterY) this.ballPassedRimTop = true;
     if (this.ballPassedRimTop && by > this.rimCenterY + 10 && by < this.rimCenterY + 55) {
-      const rimLeft  = this.rimCenterX - this.rimWidth / 2 + totalOx + 10;
-      const rimRight = this.rimCenterX + this.rimWidth / 2 + totalOx - 10;
+      const rimLeft  = this.rimCenterX - this.scoringHalf + totalOx;
+      const rimRight = this.rimCenterX + this.scoringHalf + totalOx;
       if (bx > rimLeft && bx < rimRight) this.triggerScore();
     }
 
