@@ -10,31 +10,35 @@
         padding: 0;
         box-sizing: border-box;
       }
-      html {
+      html, body {
+        width: 100%;
         height: 100%;
-        height: -webkit-fill-available;
-      }
-      body {
-        background: #080b10;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        width: 100vw;
-        height: 100dvh;
-        min-height: -webkit-fill-available;
+        margin: 0;
         overflow: hidden;
+        background: #080b10;
       }
       #game-container {
-        position: relative;
-        width: 100vw;
-        height: 100dvh;
-        min-height: -webkit-fill-available;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
         overflow: hidden;
       }
     </style>
   </head>
   <body>
     <div id="game-container"></div>
+    <script>
+      // 用 window.innerHeight 鎖定容器高度，避免行動瀏覽器導覽列佔用空間
+      function fixSize() {
+        const c = document.getElementById('game-container');
+        c.style.width  = window.innerWidth  + 'px';
+        c.style.height = window.innerHeight + 'px';
+      }
+      fixSize();
+      window.addEventListener('resize', fixSize);
+    </script>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
