@@ -371,10 +371,10 @@ export default class GameScene extends Phaser.Scene {
     this._imgFull('ui-bottombar', 20);
 
     // 動態數值：餘額（BALANCE 標題正下方）
-    this.balanceText = this.add.text(22, 662, `$${this.balance.toLocaleString()}`, {
+    this.balanceText = this.add.text(65, 662, `$${this.balance.toLocaleString()}`, {
       fontFamily: 'DSEG7, monospace', fontSize: '15px',
       color: '#c9a84c',
-    }).setDepth(21);
+    }).setOrigin(0.5, 0).setDepth(21);
 
     // 動態數值：難度（MODE 標題正下方）
     this.diffBtn = this.add.text(w / 2, 662, '簡單', {
@@ -384,10 +384,10 @@ export default class GameScene extends Phaser.Scene {
     this.diffBtn.on('pointerup', () => this.cycleDifficulty());
 
     // 動態數值：投注（YOUR BET 標題正下方）
-    this.betText = this.add.text(w - 22, 662, `$${this.betAmount}`, {
+    this.betText = this.add.text(325, 662, `$${this.betAmount}`, {
       fontFamily: 'DSEG7, monospace', fontSize: '15px',
       color: '#c9a84c',
-    }).setOrigin(1, 0).setInteractive({ useHandCursor: true }).setDepth(21);
+    }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true }).setDepth(21);
     this.betText.on('pointerup', () => this.cycleBet());
 
     // 倍率顯示（底部中間，投注欄上方）
