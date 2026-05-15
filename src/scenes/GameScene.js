@@ -539,7 +539,7 @@ export default class GameScene extends Phaser.Scene {
   _createBackboard(machineW) {
     return this.matter.add.rectangle(
       GAME_WIDTH / 2, BACKBOARD_Y, machineW, BACKBOARD_THICK,
-      { isStatic: true, label: 'backboard', friction: 0.30, restitution: 0.40 }
+      { isStatic: true, label: 'backboard', friction: 0, restitution: 0.40 }
     );
   }
 
