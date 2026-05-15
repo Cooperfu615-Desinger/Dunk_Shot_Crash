@@ -2,8 +2,8 @@ export const GAME_WIDTH = 390;
 export const GAME_HEIGHT = 844;
 
 // Perspective corridor layout
-export const BACK_WALL_BOTTOM_Y = 550; // 廊道地板與後牆的交界 y
-export const COURT_FLOOR_Y = 756;      // 物理地板 y（底部 UI 上方）
+export const BACK_WALL_BOTTOM_Y = 700; // 廊道地板與後牆的交界 y
+export const COURT_FLOOR_Y = 700;      // 物理地板 y（底部 UI 上方）
 
 export const COLORS = {
   background: 0x080b10,
@@ -22,7 +22,7 @@ export const DIFFICULTY = {
     scoringHalf: 40,   // 進球判定半寬（rimBodyOffset - RIM_W/2 = 40）
     rimX: GAME_WIDTH / 2,
     rimY: 330,   // 校準至美術圖 rim.png 的像素位置
-    machineWidth: 282,  // 校準至 panel-overlay 走廊寬度
+    machineWidth: 300,  // 校準至 panel-overlay 走廊寬度
     rimMove: false,
     elasticityRange: [0.70, 0.90],
     boardAngleRange: [-3, 3],
@@ -35,7 +35,7 @@ export const DIFFICULTY = {
     scoringHalf: 28,
     rimX: GAME_WIDTH / 2,
     rimY: 330,
-    machineWidth: 230,
+    machineWidth: 300,
     rimMove: true,
     rimMoveSpeed: 60,
     rimMoveRange: 10,
@@ -50,7 +50,7 @@ export const DIFFICULTY = {
     scoringHalf: 23,
     rimX: GAME_WIDTH / 2,
     rimY: 330,
-    machineWidth: 180,
+    machineWidth: 300,
     rimMove: true,
     rimMoveSpeed: 140,
     rimMoveRange: 25,
