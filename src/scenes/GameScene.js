@@ -16,17 +16,14 @@ const RIM_W = 20;
 const RIM_H = 15;
 
 // 機台側牆頂部（走廊側牆從這裡開始，不延伸到天花板）
-const MACHINE_TOP_Y = 140;
-
-// 地板前後分界（中間分割點）
-const FLOOR_MID_Y = 653;  // (BACK_WALL_BOTTOM_Y 550 + COURT_FLOOR_Y 756) / 2
+const MACHINE_TOP_Y = 115;
 
 // 地板摩擦係數設定
-const FLOOR_REAR = { friction: 0.60, restitution: 0.25 };  // 後段（籃框下方）：球落地後能量消耗快
-const FLOOR_FRONT = { friction: 0.40, restitution: 0.45 };  // 前段（玩家區）：正常彈跳
+const FLOOR_REAR = { friction: 0.60, restitution: 0.25 };
+const FLOOR_FRONT = { friction: 0.40, restitution: 0.45 };
 
 // 籃板
-const BACKBOARD_Y = 285;  // 物理位置（比籃框 341 高約 56px）
+const BACKBOARD_Y = 235;  // 物理位置（比籃框高約 40px）
 const BACKBOARD_THICK = 10;
 
 // Debug 視覺化顏色表
@@ -41,15 +38,15 @@ const DBG = {
   ball: { c: 0xffffff, a: 0.30 },
 };
 
-// 圖片畫布 780×1688 對應遊戲 390×844，縮放 0.5×
-const IMG_CX = GAME_WIDTH / 2;  // 195
-const IMG_CY = GAME_HEIGHT / 2;  // 422
+// 圖片畫布 780×1400 對應遊戲 390×700，縮放 0.5×
+const IMG_CX = GAME_WIDTH / 2;   // 195
+const IMG_CY = GAME_HEIGHT / 2;  // 350
 
-// 從像素分析得到的元件位置（遊戲座標）
+// 從像素分析得到的元件位置（遊戲座標，依新圖比例校準）
 const ART = {
-  scoreboard: { cx: 195, cy: 182 },   // 計分板中心
-  rim: { cx: 196, cy: 341 },   // 籃框中心
-  net: { cx: 197, cy: 365 },   // 籃網中心（中間透明）
+  scoreboard: { cx: 195, cy: 150 },   // 計分板中心
+  rim: { cx: 196, cy: 275 },          // 籃框中心
+  net: { cx: 197, cy: 300 },          // 籃網中心
 };
 
 export default class GameScene extends Phaser.Scene {
@@ -174,17 +171,10 @@ export default class GameScene extends Phaser.Scene {
     const { width, height } = this.scale;
     const scaleX = width / GAME_WIDTH;
     const scaleY = height / GAME_HEIGHT;
-    // 手機（≤600px）：ENVELOP 撐滿螢幕，無黑邊
-    // 桌機 / 平板：FIT 完整顯示，保持比例
-    const isMobile = width <= 600;
-    const zoom = isMobile ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);
+    // FIT：完整顯示遊戲世界，多餘空間由背景色填滿（與 body 同色，無黑邊感）
+    const zoom = Math.min(scaleX, scaleY);
     this.cameras.main.setZoom(zoom);
-
-    // 可見世界高度：確保底部 UI 永遠可見
-    // 若畫面比遊戲世界短（ENVELOP 裁切），Camera 往下偏移錨定底部
-    const visH = height / zoom;
-    const centerY = Math.max(GAME_HEIGHT / 2, GAME_HEIGHT - visH / 2);
-    this.cameras.main.centerOn(GAME_WIDTH / 2, centerY);
+    this.cameras.main.centerOn(GAME_WIDTH / 2, GAME_HEIGHT / 2);
   }
 
   // ─── 共用：全畫布圖片貼法 ─────────────────────────────────
@@ -205,8 +195,8 @@ export default class GameScene extends Phaser.Scene {
     // 層次 1：籃球機本體（中間透明，球在裡面玩）
     this._imgFull('panel-overlay', 1);
 
-    // 物理：天花板（y=80，限制球不飛太高，射太用力會彈回）
-    this.ceilingBody = this.matter.add.rectangle(GAME_WIDTH / 2, 80, GAME_WIDTH, 20, {
+    // 物理：天花板（y=65，限制球不飛太高）
+    this.ceilingBody = this.matter.add.rectangle(GAME_WIDTH / 2, 65, GAME_WIDTH, 20, {
       isStatic: true, label: 'ceiling', friction: 0, restitution: 0.55,
     });
     // 物理：地板（單一薄板，球落地後觸發失敗）
@@ -383,36 +373,36 @@ export default class GameScene extends Phaser.Scene {
     this._imgFull('ui-bottombar', 20);
 
     // 動態數值：餘額（BALANCE 標題正下方）
-    this.balanceText = this.add.text(22, 800, `$${this.balance.toLocaleString()}`, {
+    this.balanceText = this.add.text(22, 662, `$${this.balance.toLocaleString()}`, {
       fontFamily: 'DM Mono, monospace', fontSize: '15px',
       fontStyle: 'bold', color: '#c9a84c',
     }).setDepth(21);
 
     // 動態數值：難度（MODE 標題正下方）
-    this.diffBtn = this.add.text(w / 2, 800, '簡單', {
+    this.diffBtn = this.add.text(w / 2, 662, '簡單', {
       fontFamily: 'DM Mono, monospace', fontSize: '15px',
       fontStyle: 'bold', color: '#c9a84c',
     }).setOrigin(0.5, 0).setInteractive({ useHandCursor: true }).setDepth(21);
     this.diffBtn.on('pointerup', () => this.cycleDifficulty());
 
     // 動態數值：投注（YOUR BET 標題正下方）
-    this.betText = this.add.text(w - 22, 800, `$${this.betAmount}`, {
+    this.betText = this.add.text(w - 22, 662, `$${this.betAmount}`, {
       fontFamily: 'DM Mono, monospace', fontSize: '15px',
       fontStyle: 'bold', color: '#c9a84c',
     }).setOrigin(1, 0).setInteractive({ useHandCursor: true }).setDepth(21);
     this.betText.on('pointerup', () => this.cycleBet());
 
     // 倍率顯示（底部中間，投注欄上方）
-    this.multText = this.add.text(w / 2, 726, '1.0x', {
+    this.multText = this.add.text(w / 2, 600, '1.0x', {
       fontFamily: 'DM Mono, monospace', fontSize: '18px', color: '#c9a84c',
     }).setOrigin(0.5, 1).setDepth(21);
 
     // 進球點數（底部右側上方）
-    this.dotsContainer = this.add.container(w - 16, 720).setDepth(21);
+    this.dotsContainer = this.add.container(w - 16, 596).setDepth(21);
     this.updateDots();
 
     // 兌現按鈕（底部中央，倍率上方）
-    this.cashoutBtn = this.add.text(w / 2, 716, '', {
+    this.cashoutBtn = this.add.text(w / 2, 590, '', {
       fontFamily: 'DM Mono, monospace', fontSize: '16px', color: '#080b10',
       backgroundColor: '#c9a84c', padding: { x: 24, y: 8 },
     }).setOrigin(0.5, 1).setInteractive({ useHandCursor: true })
