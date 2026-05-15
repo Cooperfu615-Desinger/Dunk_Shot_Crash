@@ -283,11 +283,9 @@ export default class GameScene extends Phaser.Scene {
 
     // LED 倍率文字（疊在計分板上）
     this.ledText = this.add.text(ART.scoreboard.cx, ART.scoreboard.cy, '1.0x', {
-      fontFamily: 'DM Mono, monospace',
+      fontFamily: 'DSEG7, monospace',
       fontSize: '22px',
-      fontStyle: 'bold',
       color: '#e03030',
-      shadow: { offsetX: 0, offsetY: 0, color: '#ff0000', blur: 14, fill: true },
     }).setOrigin(0.5).setDepth(10);
 
     // 物理：籃框左右碰撞體（寬扁矩形，對應美術籃框兩端橫桿）
@@ -374,8 +372,8 @@ export default class GameScene extends Phaser.Scene {
 
     // 動態數值：餘額（BALANCE 標題正下方）
     this.balanceText = this.add.text(22, 662, `$${this.balance.toLocaleString()}`, {
-      fontFamily: 'DM Mono, monospace', fontSize: '15px',
-      fontStyle: 'bold', color: '#c9a84c',
+      fontFamily: 'DSEG7, monospace', fontSize: '15px',
+      color: '#c9a84c',
     }).setDepth(21);
 
     // 動態數值：難度（MODE 標題正下方）
@@ -387,14 +385,14 @@ export default class GameScene extends Phaser.Scene {
 
     // 動態數值：投注（YOUR BET 標題正下方）
     this.betText = this.add.text(w - 22, 662, `$${this.betAmount}`, {
-      fontFamily: 'DM Mono, monospace', fontSize: '15px',
-      fontStyle: 'bold', color: '#c9a84c',
+      fontFamily: 'DSEG7, monospace', fontSize: '15px',
+      color: '#c9a84c',
     }).setOrigin(1, 0).setInteractive({ useHandCursor: true }).setDepth(21);
     this.betText.on('pointerup', () => this.cycleBet());
 
     // 倍率顯示（底部中間，投注欄上方）
     this.multText = this.add.text(w / 2, 600, '1.0x', {
-      fontFamily: 'DM Mono, monospace', fontSize: '18px', color: '#c9a84c',
+      fontFamily: 'DSEG7, monospace', fontSize: '18px', color: '#c9a84c',
     }).setOrigin(0.5, 1).setDepth(21);
 
     // 進球點數（底部右側上方）
@@ -403,7 +401,7 @@ export default class GameScene extends Phaser.Scene {
 
     // 兌現按鈕（底部中央，倍率上方）
     this.cashoutBtn = this.add.text(w / 2, 590, '', {
-      fontFamily: 'DM Mono, monospace', fontSize: '16px', color: '#080b10',
+      fontFamily: 'DSEG7, monospace', fontSize: '16px', color: '#080b10',
       backgroundColor: '#c9a84c', padding: { x: 24, y: 8 },
     }).setOrigin(0.5, 1).setInteractive({ useHandCursor: true })
       .setAlpha(0).setDepth(21);
