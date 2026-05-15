@@ -8,9 +8,9 @@ import * as api from '../api/roundApi.js';
 
 // ─── 常數 ─────────────────────────────────────────────────
 const WALL_THICK  = 16;
-const BALL_RADIUS = 22;
-const BALL_R_FAR  = 15;   // 遠端（靠近籃框）視覺半徑
-const BALL_R_NEAR = 28;   // 近端（靠近玩家）視覺半徑
+const BALL_RADIUS = 26;
+const BALL_R_FAR  = 18;   // 遠端（靠近籃框）視覺半徑
+const BALL_R_NEAR = 34;   // 近端（靠近玩家）視覺半徑
 // 籃框碰撞體（對應美術 art 40×34，遊戲座標各 ÷2）
 const RIM_W = 20;
 const RIM_H = 17;
@@ -153,6 +153,8 @@ export default class GameScene extends Phaser.Scene {
     };
 
     poly(this.ceilingBody, DBG.ceiling);
+    poly(this.leftWallCap,    DBG.ceiling);
+    poly(this.rightWallCap,   DBG.ceiling);
     poly(this.floorBody,   DBG.floor);
     poly(this.leftWallBlock,  DBG.wallV);
     poly(this.rightWallBlock, DBG.wallV);
@@ -226,8 +228,12 @@ export default class GameScene extends Phaser.Scene {
   _rebuildSideWallBlocks(machineW) {
     if (this.leftWallBlock)  this.matter.world.remove(this.leftWallBlock);
     if (this.rightWallBlock) this.matter.world.remove(this.rightWallBlock);
+    if (this.leftWallCap)    this.matter.world.remove(this.leftWallCap);
+    if (this.rightWallCap)   this.matter.world.remove(this.rightWallCap);
+
     const sideW = (GAME_WIDTH - machineW) / 2;
     const halfH = BACK_WALL_BOTTOM_Y / 2;
+
     // 左側薄牆：貼在走廊左內緣
     this.leftWallBlock = this.matter.add.rectangle(
       sideW - WALL_THICK / 2, halfH, WALL_THICK, BACK_WALL_BOTTOM_Y,
@@ -237,6 +243,15 @@ export default class GameScene extends Phaser.Scene {
     this.rightWallBlock = this.matter.add.rectangle(
       GAME_WIDTH - sideW + WALL_THICK / 2, halfH, WALL_THICK, BACK_WALL_BOTTOM_Y,
       { isStatic: true, label: 'wall', friction: 0.05, restitution: 0.72 }
+    );
+    // 水平頂蓋（防止球從走廊外側上方飛出）
+    this.leftWallCap = this.matter.add.rectangle(
+      sideW / 2, MACHINE_TOP_Y, sideW, WALL_THICK,
+      { isStatic: true, label: 'ceiling', friction: 0, restitution: 0.55 }
+    );
+    this.rightWallCap = this.matter.add.rectangle(
+      GAME_WIDTH - sideW / 2, MACHINE_TOP_Y, sideW, WALL_THICK,
+      { isStatic: true, label: 'ceiling', friction: 0, restitution: 0.55 }
     );
   }
 
