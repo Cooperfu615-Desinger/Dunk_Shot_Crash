@@ -18,11 +18,11 @@ export const COLORS = {
 export const DIFFICULTY = {
   easy: {
     label: '簡單',
-    rimBodyOffset: 40,   // 籃框碰撞體距中心距離（美術內緣 ≈ 24，加寬給容易版）
-    scoringHalf: 40,   // 進球判定半寬（rimBodyOffset - RIM_W/2 = 40）
+    rimBodyOffset: 52,   // 內緣間距 = 2×52-20 = 84px > 球徑 66px
+    scoringHalf: 42,
     rimX: GAME_WIDTH / 2,
-    rimY: 275,   // 校準至美術圖 rim.png 的像素位置
-    machineWidth: 340,  // 校準至 panel-overlay 走廊寬度
+    rimY: 275,
+    machineWidth: 340,
     rimMove: false,
     elasticityRange: [0.70, 0.90],
     boardAngleRange: [-3, 3],
@@ -31,8 +31,8 @@ export const DIFFICULTY = {
   },
   normal: {
     label: '普通',
-    rimBodyOffset: 38,
-    scoringHalf: 28,
+    rimBodyOffset: 48,   // 內緣間距 = 2×48-20 = 76px > 球徑 66px
+    scoringHalf: 36,
     rimX: GAME_WIDTH / 2,
     rimY: 275,
     machineWidth: 340,
@@ -46,8 +46,8 @@ export const DIFFICULTY = {
   },
   hard: {
     label: '困難',
-    rimBodyOffset: 33,
-    scoringHalf: 23,
+    rimBodyOffset: 44,   // 內緣間距 = 2×44-20 = 68px > 球徑 66px（窄但可過）
+    scoringHalf: 28,
     rimX: GAME_WIDTH / 2,
     rimY: 275,
     machineWidth: 340,
