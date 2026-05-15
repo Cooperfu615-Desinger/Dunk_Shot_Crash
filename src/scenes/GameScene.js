@@ -8,9 +8,9 @@ import * as api from '../api/roundApi.js';
 
 // ─── 常數 ─────────────────────────────────────────────────
 const WALL_THICK = 16;
-const BALL_RADIUS = 26;
-const BALL_R_FAR = 18;   // 遠端（靠近籃框）視覺半徑
-const BALL_R_NEAR = 34;   // 近端（靠近玩家）視覺半徑
+const BALL_RADIUS = 33;
+const BALL_R_FAR = 23;   // 遠端（靠近籃框）視覺半徑
+const BALL_R_NEAR = 42;   // 近端（靠近玩家）視覺半徑
 // 籃框碰撞體（對應美術 art 40×34，遊戲座標各 ÷2）
 const RIM_W = 20;
 const RIM_H = 15;
