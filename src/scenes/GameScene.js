@@ -697,6 +697,10 @@ export default class GameScene extends Phaser.Scene {
     this.ballsScored++;
     this.rimSeedOffsetX = 0;
 
+    // 進球後直接往下落，不停留在籃網
+    this.matter.body.setVelocity(this.ballBody, { x: 0, y: 10 });
+    this.matter.body.setAngularVelocity(this.ballBody, 0);
+
     // 籃網搖動效果
     this.tweens.add({
       targets: this.netImg,
