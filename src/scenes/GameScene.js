@@ -179,7 +179,12 @@ export default class GameScene extends Phaser.Scene {
     const isMobile = width <= 600;
     const zoom = isMobile ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);
     this.cameras.main.setZoom(zoom);
-    this.cameras.main.centerOn(GAME_WIDTH / 2, GAME_HEIGHT / 2);
+
+    // 可見世界高度：確保底部 UI 永遠可見
+    // 若畫面比遊戲世界短（ENVELOP 裁切），Camera 往下偏移錨定底部
+    const visH = height / zoom;
+    const centerY = Math.max(GAME_HEIGHT / 2, GAME_HEIGHT - visH / 2);
+    this.cameras.main.centerOn(GAME_WIDTH / 2, centerY);
   }
 
   // ─── 共用：全畫布圖片貼法 ─────────────────────────────────
