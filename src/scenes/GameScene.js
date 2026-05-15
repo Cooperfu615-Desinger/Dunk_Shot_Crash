@@ -222,21 +222,20 @@ export default class GameScene extends Phaser.Scene {
     this._rebuildAngledWalls(diff.machineWidth);
   }
 
-  /** 重建上段側牆實心矩形（從機台頂部 MACHINE_TOP_Y 到 BACK_WALL_BOTTOM_Y） */
+  /** 重建上段側牆薄牆（16px 細條，只有內側面會碰撞，無頂底面問題） */
   _rebuildSideWallBlocks(machineW) {
     if (this.leftWallBlock)  this.matter.world.remove(this.leftWallBlock);
     if (this.rightWallBlock) this.matter.world.remove(this.rightWallBlock);
-    const sideW  = (GAME_WIDTH - machineW) / 2;
-    const wallH  = BACK_WALL_BOTTOM_Y - MACHINE_TOP_Y;   // 不延伸到天花板
-    const wallCY = MACHINE_TOP_Y + wallH / 2;
-    // 左側：x=0 ~ sideW
+    const sideW = (GAME_WIDTH - machineW) / 2;
+    const halfH = BACK_WALL_BOTTOM_Y / 2;
+    // 左側薄牆：貼在走廊左內緣
     this.leftWallBlock = this.matter.add.rectangle(
-      sideW / 2, wallCY, sideW, wallH,
+      sideW - WALL_THICK / 2, halfH, WALL_THICK, BACK_WALL_BOTTOM_Y,
       { isStatic: true, label: 'wall', friction: 0.05, restitution: 0.72 }
     );
-    // 右側：x=(GAME_WIDTH-sideW) ~ GAME_WIDTH
+    // 右側薄牆：貼在走廊右內緣
     this.rightWallBlock = this.matter.add.rectangle(
-      GAME_WIDTH - sideW / 2, wallCY, sideW, wallH,
+      GAME_WIDTH - sideW + WALL_THICK / 2, halfH, WALL_THICK, BACK_WALL_BOTTOM_Y,
       { isStatic: true, label: 'wall', friction: 0.05, restitution: 0.72 }
     );
   }
