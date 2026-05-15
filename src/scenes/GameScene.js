@@ -158,9 +158,6 @@ export default class GameScene extends Phaser.Scene {
     poly(this.floorBody, DBG.floor);
     poly(this.leftWallBlock, DBG.wallV);
     poly(this.rightWallBlock, DBG.wallV);
-    poly(this.lowerLeftWall, DBG.wallA);
-    poly(this.lowerRightWall, DBG.wallA);
-    poly(this.backboardBody, DBG.backboard);
     poly(this.leftRimBody, DBG.rim);
     poly(this.rightRimBody, DBG.rim);
     poly(this.goalSensor, DBG.goal);
@@ -218,10 +215,7 @@ export default class GameScene extends Phaser.Scene {
     this.rightWallBlock = null;
     this._rebuildSideWallBlocks(diff.machineWidth);
 
-    // 物理：下段斜牆（走廊收斂區域）
-    this.lowerLeftWall = null;
-    this.lowerRightWall = null;
-    this._rebuildAngledWalls(diff.machineWidth);
+    // 下段斜牆已移除
   }
 
   /** 重建上段側牆薄牆（16px 細條，只有內側面會碰撞，無頂底面問題） */
@@ -315,8 +309,8 @@ export default class GameScene extends Phaser.Scene {
       cx, cy + 10, 40, 14,
       { isStatic: true, isSensor: true, label: 'goal' }
     );
-    // 物理：籃板（摩擦大，打板反彈不會太遠，適合打板球）
-    this.backboardBody = this._createBackboard(diff.machineWidth);
+    // 籃板物理體已移除
+    this.backboardBody = null;
 
     this.rimCenterX = cx;
     this.rimCenterY = cy;
@@ -496,7 +490,6 @@ export default class GameScene extends Phaser.Scene {
     // 更新物理牆壁
     this.machineWidth = diff.machineWidth;
     this._updateUpperWalls(diff.machineWidth);
-    this._rebuildAngledWalls(diff.machineWidth);
 
     // 更新籃框物理體（rimBodyOffset/scoringHalf 在 _updateRimPhysics 內更新）
     this.rimCenterX = diff.rimX;
@@ -531,9 +524,6 @@ export default class GameScene extends Phaser.Scene {
     this.matter.body.setPosition(this.goalSensor, { x: diff.rimX, y: diff.rimY + 10 });
     this.rimBodyOffset = ro;
     this.scoringHalf = diff.scoringHalf;
-    // 籃板：寬度隨難度改變，需重建
-    if (this.backboardBody) this.matter.world.remove(this.backboardBody);
-    this.backboardBody = this._createBackboard(diff.machineWidth);
   }
 
   _createBackboard(machineW) {
