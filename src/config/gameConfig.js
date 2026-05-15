@@ -22,7 +22,7 @@ export const DIFFICULTY = {
     scoringHalf: 40,   // 進球判定半寬（rimBodyOffset - RIM_W/2 = 40）
     rimX: GAME_WIDTH / 2,
     rimY: 275,   // 校準至美術圖 rim.png 的像素位置
-    machineWidth: 300,  // 校準至 panel-overlay 走廊寬度
+    machineWidth: 340,  // 校準至 panel-overlay 走廊寬度
     rimMove: false,
     elasticityRange: [0.70, 0.90],
     boardAngleRange: [-3, 3],
@@ -35,7 +35,7 @@ export const DIFFICULTY = {
     scoringHalf: 28,
     rimX: GAME_WIDTH / 2,
     rimY: 275,
-    machineWidth: 300,
+    machineWidth: 340,
     rimMove: true,
     rimMoveSpeed: 60,
     rimMoveRange: 10,
@@ -50,7 +50,7 @@ export const DIFFICULTY = {
     scoringHalf: 23,
     rimX: GAME_WIDTH / 2,
     rimY: 275,
-    machineWidth: 300,
+    machineWidth: 340,
     rimMove: true,
     rimMoveSpeed: 140,
     rimMoveRange: 25,
